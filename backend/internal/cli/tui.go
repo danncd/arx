@@ -183,7 +183,7 @@ func (m *model) setView() {
 	if m.cur != "" {
 		content += m.renderMD(m.cur)
 	}
-	m.vp.SetContent(lipgloss.NewStyle().Width(max(m.vp.Width, 8)).Render(content))
+	m.vp.SetContent(lipgloss.NewStyle().Width(max(m.vp.Width, 8)).PaddingLeft(1).Render(content))
 	if follow {
 		m.vp.GotoBottom()
 	}
