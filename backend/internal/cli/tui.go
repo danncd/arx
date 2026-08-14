@@ -37,6 +37,7 @@ var (
 	userStyle   = lipgloss.NewStyle().Bold(true)
 	thinkStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	failStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	sepStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 )
 
 /* Turn events, sent from the agent's goroutine into the update loop. */
@@ -96,7 +97,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.vp.Width = msg.Width
-		m.vp.Height = max(msg.Height-2, 1) // header row + input row
+		m.vp.Height = max(msg.Height-4, 1) // header, two separators, input
 		m.ti.Width = max(msg.Width-5, 8)
 		m.push("") // re-wrap the transcript for the new width
 
@@ -165,8 +166,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) View() string {
 	title := " Arx · " + m.header + " "
+	sep := sepStyle.Render(strings.Repeat("─", max(m.width, 8)))
 	return headerStyle.Width(max(m.width, len(title))).Render(title) + "\n" +
+		sep + "\n" +
 		m.vp.View() + "\n" +
+		sep + "\n" +
 		m.ti.View()
 }
 
