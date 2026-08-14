@@ -70,6 +70,12 @@ func TestChatGuards(t *testing.T) {
 		t.Fatalf("empty choices: %v", err)
 	}
 
+	// A bare-string error envelope surfaces the provider's words too.
+	prof = serve(`{"error":"rate limited, retry later"}`)
+	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "rate limited, retry later") {
+		t.Fatalf("string error envelope lost: %v", err)
+	}
+
 	// Token limit mid tool-call: truncated arguments.
 	prof = serve(`{"choices":[{"message":{"role":"assistant","content":"","tool_calls":[{"id":"c1","type":"function","function":{"name":"t","arguments":"{\"city\":\"San Fr"}}]},"finish_reason":"length"}]}`)
 	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "token limit") {

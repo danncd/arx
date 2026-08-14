@@ -133,8 +133,19 @@ func Chat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec) (
 	}
 	defer resp.Body.Close()
 
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return Message{}, fmt.Errorf("read chat response: %w", err)
+	}
 	var cr chatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&cr); err != nil {
+	if err := json.Unmarshal(raw, &cr); err != nil {
+		// some gateways send the error as a bare string, same as in streams
+		var alt struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(raw, &alt) == nil && alt.Error != "" {
+			return Message{}, fmt.Errorf("%s chat error: %s", prof.Provider.Name, alt.Error)
+		}
 		return Message{}, fmt.Errorf("decode chat response: %w", err)
 	}
 	if cr.Error != nil {
@@ -181,7 +192,7 @@ func completionErr(msg Message, finish string) error {
 	}
 	for _, c := range msg.ToolCalls {
 		if c.ID == "" || c.Function.Name == "" {
-			return fmt.Errorf("assembled tool call missing id or name (malformed stream)")
+			return fmt.Errorf("reply carries a tool call missing id or name")
 		}
 	}
 	if msg.Content == "" && len(msg.ToolCalls) == 0 {
