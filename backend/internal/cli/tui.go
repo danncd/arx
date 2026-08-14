@@ -45,9 +45,9 @@ var (
 	thinkStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	failStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 	sepStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#2ea77a"))
-	// tool line: gray brackets around a warm coral name (jade's complement)
+	// tool line: gray brackets around a light blue name
 	toolBracket = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	toolName    = lipgloss.NewStyle().Foreground(lipgloss.Color("#e0876b"))
+	toolName    = lipgloss.NewStyle().Foreground(lipgloss.Color("#6fb7e6"))
 )
 
 /* Turn events, sent from the agent's goroutine into the update loop. */
@@ -326,7 +326,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.endThink()
 		m.finalizeCur() // any answer text before the call bakes first
 		m.push(toolBracket.Render(" 〔 ") + toolName.Render(msg.name) +
-			toolBracket.Render(" 〕") + thinkDuration(msg.took) + "\n")
+			toolBracket.Render(" 〕") + thinkDuration(msg.took) + "\n\n")
 
 	case doneMsg:
 		m.waiting = false
