@@ -13,11 +13,15 @@ func TestNormalizeModelID(t *testing.T) {
 	}{
 		{"deepseek/deepseek-chat", "deepseek-chat"},
 		{"deepseek-v4-flash", "deepseek-v4-flash"},
-		{"meta-llama/llama-3-70b:free", "llama-3-70b"},
 		{"gpt-5-2025-08-07", "gpt-5"},
 		{"openai/gpt-5-pro-2025-10-06", "gpt-5-pro"},
 		{"GPT-5.2", "gpt-5.2"},
 		{"gpt-4-0613", "gpt-4-0613"},
+		// Colons are structural in fine-tune ids and must survive —
+		// stripping them collapsed every ft: model onto the key "ft".
+		// (":free" variant suffixes are handled in fetchORCatalog.)
+		{"ft:gpt-4o-mini-2024-07-18:acme::9abc", "ft:gpt-4o-mini-2024-07-18:acme::9abc"},
+		{"meta-llama/llama-3-70b:free", "llama-3-70b:free"},
 	}
 	for _, c := range cases {
 		t.Run(c.in, func(t *testing.T) {
@@ -60,6 +64,40 @@ func TestFetchORCatalog(t *testing.T) {
 	}
 	if _, ok := index["sora-2"]; !ok {
 		t.Fatal("fetch should index everything; filtering is LoadModels' job")
+	}
+}
+
+// A ":free" variant shares its base model's key; the base entry's
+// metadata must win no matter which the catalog lists first, because
+// variants routinely differ in context length and tool support.
+func TestFetchORCatalogBaseBeatsVariant(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"data":[
+			{"id":"deepseek/deepseek-r1:free","context_length":32000,
+			 "architecture":{"modality":"text->text"}},
+			{"id":"deepseek/deepseek-r1","context_length":128000,
+			 "supported_parameters":["tools"],
+			 "architecture":{"modality":"text->text"}},
+			{"id":"vendor/lonely:free","context_length":8000,
+			 "architecture":{"modality":"text->text"}}
+		]}`))
+	}))
+	defer srv.Close()
+
+	old := orModelsURL
+	orModelsURL = srv.URL
+	defer func() { orModelsURL = old }()
+
+	index, err := fetchORCatalog(context.Background())
+	if err != nil {
+		t.Fatalf("fetchORCatalog: %v", err)
+	}
+	if om := index["deepseek-r1"]; om.ContextLength != 128000 || !contains(om.SupportedParameters, "tools") {
+		t.Fatalf("variant-first ordering clobbered the base entry: %+v", om)
+	}
+	// A variant with no base entry still fills the key.
+	if om := index["lonely"]; om.ContextLength != 8000 {
+		t.Fatalf("variant-only model missing from index: %+v", om)
 	}
 }
 

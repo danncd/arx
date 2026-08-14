@@ -51,12 +51,20 @@ func fetchORCatalog(ctx context.Context) (map[string]orModel, error) {
 		return nil, fmt.Errorf("decode openrouter catalog: %w", err)
 	}
 	index := make(map[string]orModel, len(list.Data))
+	isVariant := map[string]bool{}
 	for _, m := range list.Data {
-		key := normalizeModelID(m.ID)
-		// Base ids and dated/":free" variants can collide after
-		// normalization; first entry wins so the choice is deterministic.
-		if _, exists := index[key]; !exists {
+		id := m.ID
+		variant := false
+		// ":free"/":nitro" routing variants share the base model's key
+		// but can differ in context length and tool support — the base
+		// entry's metadata must win regardless of response order.
+		if i := strings.IndexByte(id, ':'); i >= 0 {
+			id, variant = id[:i], true
+		}
+		key := normalizeModelID(id)
+		if _, exists := index[key]; !exists || (isVariant[key] && !variant) {
 			index[key] = m
+			isVariant[key] = variant
 		}
 	}
 	return index, nil
@@ -64,12 +72,15 @@ func fetchORCatalog(ctx context.Context) (map[string]orModel, error) {
 
 var datedSnapshot = regexp.MustCompile(`-\d{4}-\d{2}-\d{2}$`)
 
+// normalizeModelID reduces a model id to a joinable bare name: vendor
+// prefix off, dated snapshot off, lowercased. Colons are deliberately
+// NOT stripped here — OpenAI fine-tune ids ("ft:gpt-4o:org::abc")
+// contain them structurally, and collapsing those to "ft" merged every
+// fine-tune onto one key. OpenRouter's ":free" variant suffixes are
+// handled at index-build time in fetchORCatalog instead.
 func normalizeModelID(id string) string {
 	if _, bare, ok := strings.Cut(id, "/"); ok {
 		id = bare
-	}
-	if i := strings.IndexByte(id, ':'); i >= 0 {
-		id = id[:i]
 	}
 	id = datedSnapshot.ReplaceAllString(id, "")
 	return strings.ToLower(id)

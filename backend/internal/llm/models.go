@@ -12,7 +12,15 @@ import (
 	"time"
 )
 
+// httpClient is for bounded metadata calls (/models, the OpenRouter
+// catalog). Completions must NOT use it: 30s spans the entire body
+// read, which a long generation legitimately exceeds.
 var httpClient = &http.Client{Timeout: 30 * time.Second}
+
+// llmClient carries no overall timeout: a healthy completion or stream
+// can legally run for minutes. The caller's ctx is the deadline
+// authority; dial timeouts still apply via the default transport.
+var llmClient = &http.Client{}
 
 type Model struct {
 	ID      string `json:"id"`
@@ -31,6 +39,23 @@ type ModelInfo struct {
 
 type modelList struct {
 	Data []Model `json:"data"`
+}
+
+// nonChatMarkers identify models that can't hold a chat conversation.
+// Fallback filter for ids OpenRouter's catalog doesn't know; naming
+// heuristics only, so it needs a new marker when a new modality ships.
+var nonChatMarkers = []string{
+	"embedding", "tts", "whisper", "audio", "transcribe", "image", "sora",
+	"realtime", "moderation", "search-api", "babbage", "davinci", "instruct",
+}
+
+func chatCapable(id string) bool {
+	for _, marker := range nonChatMarkers {
+		if strings.Contains(id, marker) {
+			return false
+		}
+	}
+	return true
 }
 
 func ListModels(ctx context.Context, p Provider) ([]Model, error) {
@@ -90,14 +115,26 @@ func LoadModels(ctx context.Context) ([]ModelInfo, error) {
 				Model:    m.ID,
 				KeyEnv:   p.KeyEnv,
 			}
+			// Three tiers of truth. Known to OpenRouter: its modality
+			// data decides, and the model gets enriched. Unknown (OR's
+			// slug namespace misses real ids: deepseek-reasoner, ft:…
+			// fine-tunes) or OR unreachable: the name heuristic decides
+			// — a join miss must never disappear a real chat model, but
+			// passing misses through unfiltered would readmit whisper,
+			// tts and friends.
+			om, known := orModel{}, false
 			if len(or) > 0 {
-				om, ok := or[normalizeModelID(m.ID)]
-				if !ok || !strings.HasSuffix(om.Architecture.Modality, "->text") {
-					continue // not a chat model per the authority: drop it
+				om, known = or[normalizeModelID(m.ID)]
+			}
+			if known {
+				if !strings.HasSuffix(om.Architecture.Modality, "->text") {
+					continue // the authority says not a chat model
 				}
 				info.ContextWindow = om.ContextLength
 				info.Reasoning = contains(om.SupportedParameters, "reasoning")
 				info.Tools = contains(om.SupportedParameters, "tools")
+			} else if !chatCapable(m.ID) {
+				continue // heuristic fallback: obviously non-chat by name
 			}
 			out = append(out, info)
 		}

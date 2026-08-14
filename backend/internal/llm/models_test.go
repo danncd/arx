@@ -85,13 +85,17 @@ func providerServing(t *testing.T, ids ...string) *httptest.Server {
 	return srv
 }
 
-// The intersection policy: a model survives only if OpenRouter lists it
-// with a text-producing modality, and survivors get the context window.
-func TestLoadModelsIntersection(t *testing.T) {
-	prov := providerServing(t, "chat-model", "video-model", "unknown-model")
+// The authority filter: a model OpenRouter knows survives only with a
+// text-producing modality (and gets enriched); a model OpenRouter does
+// NOT know passes through unenriched — OR's slug namespace misses real
+// provider-native ids (deepseek-reasoner, ft:… fine-tunes), and a join
+// miss must never disappear a working model.
+func TestLoadModelsAuthorityFilter(t *testing.T) {
+	prov := providerServing(t, "chat-model", "video-model", "unknown-model", "whisper-native")
 	or := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"data":[
 			{"id":"fake/chat-model","context_length":128000,
+			 "supported_parameters":["reasoning","tools"],
 			 "architecture":{"modality":"text->text"}},
 			{"id":"fake/video-model","context_length":0,
 			 "architecture":{"modality":"text->video"}}
@@ -104,11 +108,28 @@ func TestLoadModelsIntersection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadModels: %v", err)
 	}
-	if len(models) != 1 || models[0].Model != "chat-model" {
-		t.Fatalf("want only chat-model to survive, got: %+v", models)
+	if len(models) != 2 {
+		t.Fatalf("want chat-model (known, text) + unknown-model (join miss) to survive, got: %+v", models)
 	}
-	if models[0].ContextWindow != 128000 {
-		t.Fatalf("context window not stamped: %+v", models[0])
+	byName := map[string]ModelInfo{}
+	for _, m := range models {
+		byName[m.Model] = m
+	}
+	if _, dropped := byName["video-model"]; dropped {
+		t.Fatalf("authority-known non-text model must be dropped: %+v", models)
+	}
+	// Tier two: a join miss whose NAME is obviously non-chat is still
+	// filtered by the heuristic.
+	if _, dropped := byName["whisper-native"]; dropped {
+		t.Fatalf("heuristic must drop non-chat join misses: %+v", models)
+	}
+	chat := byName["chat-model"]
+	if chat.ContextWindow != 128000 || !chat.Reasoning || !chat.Tools {
+		t.Fatalf("known model not enriched: %+v", chat)
+	}
+	unknown := byName["unknown-model"]
+	if unknown.ContextWindow != 0 || unknown.Reasoning || unknown.Tools {
+		t.Fatalf("join miss must pass through UNenriched: %+v", unknown)
 	}
 }
 

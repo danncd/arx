@@ -53,6 +53,8 @@ func main() {
 	msgs := []llm.Message{{Role: "system", Content: "You are arx, a concise assistant."}}
 
 	in := bufio.NewScanner(os.Stdin)
+	// Default cap is 64KB per line; a big pasted log would end the REPL.
+	in.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for {
 		fmt.Print("> ")
 		if !in.Scan() {
@@ -92,6 +94,12 @@ func main() {
 			}
 		}
 	}
+	// Scan() returning false is EOF only when Err() is nil; a too-long
+	// line or a read error must not masquerade as a clean ctrl-D.
+	if err := in.Err(); err != nil {
+		fmt.Fprintln(os.Stderr, "arx: stdin:", err)
+		os.Exit(1)
+	}
 }
 
 func runTool(tc llm.ToolCall) string {
@@ -102,6 +110,11 @@ func runTool(tc llm.ToolCall) string {
 	out, err := t.Run(context.Background(), json.RawMessage(tc.Function.Arguments))
 	if err != nil {
 		return "error: " + err.Error()
+	}
+	if out == "" {
+		// The model can't distinguish "ran, no output" from a dropped
+		// result; say it explicitly.
+		return "(no output)"
 	}
 	return out
 }
