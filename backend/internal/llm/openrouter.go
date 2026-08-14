@@ -12,11 +12,21 @@ import (
 var orModelsURL = "https://openrouter.ai/api/v1/models"
 
 type orModel struct {
-	ID            string `json:"id"`
-	ContextLength int    `json:"context_length"`
-	Architecture  struct {
+	ID                  string   `json:"id"`
+	ContextLength       int      `json:"context_length"`
+	SupportedParameters []string `json:"supported_parameters"`
+	Architecture        struct {
 		Modality string `json:"modality"`
 	} `json:"architecture"`
+}
+
+func contains(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
 
 type orList struct {

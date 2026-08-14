@@ -32,6 +32,7 @@ func TestFetchORCatalog(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"data":[
 			{"id":"deepseek/deepseek-v4-flash","context_length":1000000,
+			 "supported_parameters":["reasoning","tools","temperature"],
 			 "architecture":{"modality":"text->text"}},
 			{"id":"openai/sora-2","context_length":0,
 			 "architecture":{"modality":"text->video"}}
@@ -53,6 +54,9 @@ func TestFetchORCatalog(t *testing.T) {
 	}
 	if om.ContextLength != 1000000 || om.Architecture.Modality != "text->text" {
 		t.Fatalf("wrong entry: %+v", om)
+	}
+	if !contains(om.SupportedParameters, "reasoning") || !contains(om.SupportedParameters, "tools") {
+		t.Fatalf("supported_parameters not decoded: %+v", om.SupportedParameters)
 	}
 	if _, ok := index["sora-2"]; !ok {
 		t.Fatal("fetch should index everything; filtering is LoadModels' job")

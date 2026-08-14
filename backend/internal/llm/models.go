@@ -25,6 +25,8 @@ type ModelInfo struct {
 	Model         string
 	KeyEnv        string
 	ContextWindow int
+	Reasoning     bool // model has a reasoning mode (per OpenRouter)
+	Tools         bool // model can call tools — required for the agent loop
 }
 
 type modelList struct {
@@ -94,6 +96,8 @@ func LoadModels(ctx context.Context) ([]ModelInfo, error) {
 					continue // not a chat model per the authority: drop it
 				}
 				info.ContextWindow = om.ContextLength
+				info.Reasoning = contains(om.SupportedParameters, "reasoning")
+				info.Tools = contains(om.SupportedParameters, "tools")
 			}
 			out = append(out, info)
 		}
