@@ -1,22 +1,18 @@
-// Package agent owns the conversation: the transcript, the model
-// choice, and the reason-act loop that advances them. It knows nothing
-// about terminals or servers; presentation lives behind Sink.
 package agent
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"unicode/utf8"
 
 	"arx/internal/llm"
 	"arx/internal/tool"
 )
 
-// ErrStepLimit reports a turn that ran out of steps while the model
-// was still calling tools. The frontend decides how to phrase it.
 var ErrStepLimit = errors.New("step limit reached before a final answer")
 
-// A Sink receives a turn's output as it happens.
 type Sink interface {
 	Token(s string, thinking bool)
 	ToolResult(name, out string)
@@ -26,44 +22,82 @@ type Controller struct {
 	prof     llm.Profile
 	maxSteps int
 	msgs     []llm.Message
+	initErr  error
 }
 
 func New(prof llm.Profile, system string) *Controller {
-	return &Controller{
+	c := &Controller{
 		prof:     prof,
-		maxSteps: 8, // backstop, not a leash
+		maxSteps: 8,
 		msgs:     []llm.Message{{Role: "system", Content: system}},
 	}
+	if !utf8.ValidString(system) {
+		c.initErr = fmt.Errorf("system prompt contains invalid UTF-8")
+	}
+	return c
 }
 
-// RunTurn advances the conversation by one user message: stream a
-// reply, execute any tool calls, feed the results back, and repeat
-// until the model answers in text or the step backstop trips.
 func (c *Controller) RunTurn(ctx context.Context, text string, sink Sink) error {
+	if c.initErr != nil {
+		return c.initErr
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !utf8.ValidString(text) {
+		return fmt.Errorf("user message contains invalid UTF-8")
+	}
 	c.msgs = append(c.msgs, llm.Message{Role: "user", Content: text})
+	toolsEnabled := !c.prof.ToolsKnown || c.prof.Tools
 	for step := 0; step < c.maxSteps; step++ {
-		reply, err := llm.Stream(ctx, c.prof, c.msgs, tool.Specs(), sink.Token)
+		var specs []llm.ToolSpec
+		if toolsEnabled {
+			specs = tool.Specs()
+		}
+		reply, err := llm.Stream(ctx, c.prof, c.msgs, specs, sink.Token)
 		if err != nil {
 			return err
+		}
+		if !toolsEnabled && len(reply.ToolCalls) > 0 {
+			return fmt.Errorf("model returned tool calls while tools are disabled")
 		}
 		c.msgs = append(c.msgs, reply)
 
 		if len(reply.ToolCalls) == 0 {
-			return nil // the model spoke: turn complete
+			return nil
 		}
-		for _, tc := range reply.ToolCalls {
+		for i, tc := range reply.ToolCalls {
+			if err := ctx.Err(); err != nil {
+				c.skipTools(reply.ToolCalls[i:], err)
+				return err
+			}
 			out := runTool(ctx, tc)
+			if !utf8.ValidString(out) {
+				err := fmt.Errorf("tool %q returned invalid UTF-8", tc.Function.Name)
+				c.skipTools(reply.ToolCalls[i:], err)
+				return err
+			}
 			sink.ToolResult(tc.Function.Name, out)
 			c.msgs = append(c.msgs, llm.Message{
 				Role: "tool", ToolCallID: tc.ID, Content: out,
 			})
+			if err := ctx.Err(); err != nil {
+				c.skipTools(reply.ToolCalls[i+1:], err)
+				return err
+			}
 		}
 	}
 	return ErrStepLimit
 }
 
-// runTool executes one call, converting every failure into an
-// observation string: the model must SEE errors, not crash the loop.
+func (c *Controller) skipTools(calls []llm.ToolCall, cause error) {
+	for _, tc := range calls {
+		c.msgs = append(c.msgs, llm.Message{
+			Role: "tool", ToolCallID: tc.ID, Content: "error: " + cause.Error(),
+		})
+	}
+}
+
 func runTool(ctx context.Context, tc llm.ToolCall) string {
 	t, ok := tool.Get(tc.Function.Name)
 	if !ok {
@@ -74,8 +108,6 @@ func runTool(ctx context.Context, tc llm.ToolCall) string {
 		return "error: " + err.Error()
 	}
 	if out == "" {
-		// The model can't distinguish "ran, no output" from a dropped
-		// result; say it explicitly.
 		return "(no output)"
 	}
 	return out

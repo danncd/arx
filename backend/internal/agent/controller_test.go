@@ -14,7 +14,8 @@ import (
 	"arx/internal/tool"
 )
 
-// recSink records a turn's events for assertions.
+/* Records turn events. */
+
 type recSink struct {
 	tokens []string
 	tools  []string
@@ -22,6 +23,18 @@ type recSink struct {
 
 func (r *recSink) Token(s string, _ bool)      { r.tokens = append(r.tokens, s) }
 func (r *recSink) ToolResult(name, out string) { r.tools = append(r.tools, name+"→"+out) }
+
+type cancelSink struct {
+	recSink
+	cancel context.CancelFunc
+}
+
+func (s *cancelSink) ToolResult(name, out string) {
+	s.recSink.ToolResult(name, out)
+	if len(s.tools) == 1 {
+		s.cancel()
+	}
+}
 
 func init() {
 	tool.Register(tool.Tool{
@@ -33,8 +46,8 @@ func init() {
 	})
 }
 
-// A full reason-act round: the model calls a tool, the result goes
-// back labeled with the call id, and the second round answers in text.
+/* Runs a full tool round. */
+
 func TestRunTurnToolRound(t *testing.T) {
 	requests := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -42,6 +55,9 @@ func TestRunTurnToolRound(t *testing.T) {
 		body, _ := io.ReadAll(r.Body)
 		switch requests {
 		case 1:
+			if !strings.Contains(string(body), `"tools"`) {
+				t.Errorf("supported tools missing from request: %s", body)
+			}
 			w.Write([]byte(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"test_echo","arguments":"{\"s\":1}"}}]}}]}` + "\n\n" +
 				`data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}` + "\n\n" +
 				"data: [DONE]\n"))
@@ -58,7 +74,10 @@ func TestRunTurnToolRound(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	prof := llm.Profile{Provider: llm.Provider{Name: "fake", BaseURL: srv.URL}, Model: "m", MaxTokens: 100}
+	prof := llm.Profile{
+		Provider: llm.Provider{Name: "fake", BaseURL: srv.URL},
+		Model:    "m", MaxTokens: 100, Tools: true, ToolsKnown: true,
+	}
 	c := New(prof, "system prompt")
 	sink := &recSink{}
 
@@ -80,8 +99,8 @@ func TestRunTurnToolRound(t *testing.T) {
 	}
 }
 
-// A model that never stops calling tools trips the backstop, and the
-// caller can tell that apart from other failures.
+/* Stops a tool loop at the step limit. */
+
 func TestRunTurnStepLimit(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"test_echo","arguments":"{}"}}]}}]}` + "\n\n" +
@@ -101,5 +120,143 @@ func TestRunTurnStepLimit(t *testing.T) {
 	// 3 rounds ran: system + user + 3×(assistant + tool result).
 	if len(c.msgs) != 8 {
 		t.Fatalf("transcript length = %d, want 8", len(c.msgs))
+	}
+}
+
+func TestRunTurnStopsToolBatchAfterCancellation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"test_echo","arguments":"{}"}},{"index":1,"id":"c2","function":{"name":"test_echo","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}` + "\n\n" +
+			"data: [DONE]\n"))
+	}))
+	t.Cleanup(srv.Close)
+
+	prof := llm.Profile{Provider: llm.Provider{Name: "fake", BaseURL: srv.URL}, Model: "m"}
+	c := New(prof, "sys")
+	ctx, cancel := context.WithCancel(context.Background())
+	sink := &cancelSink{cancel: cancel}
+
+	err := c.RunTurn(ctx, "run both", sink)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context cancellation, got: %v", err)
+	}
+	if len(sink.tools) != 1 {
+		t.Fatalf("tools executed after cancellation: %v", sink.tools)
+	}
+	if len(c.msgs) != 5 || c.msgs[4].ToolCallID != "c2" || !strings.Contains(c.msgs[4].Content, "context canceled") {
+		t.Fatalf("canceled tool exchange is incomplete: %+v", c.msgs)
+	}
+}
+
+func TestRunTurnDoesNotOfferUnsupportedTools(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), `"tools"`) {
+			t.Errorf("request offered unsupported tools: %s", body)
+		}
+		w.Write([]byte(`data: {"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
+			"data: [DONE]\n"))
+	}))
+	t.Cleanup(srv.Close)
+
+	prof := llm.Profile{
+		Provider: llm.Provider{Name: "fake", BaseURL: srv.URL},
+		Model:    "m", ToolsKnown: true,
+	}
+	if err := New(prof, "sys").RunTurn(context.Background(), "hello", &recSink{}); err != nil {
+		t.Fatalf("RunTurn: %v", err)
+	}
+}
+
+func TestRunTurnOffersToolsWhenCapabilityIsUnknown(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), `"tools"`) {
+			t.Errorf("unknown capability disabled tools: %s", body)
+		}
+		w.Write([]byte(`data: {"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
+			"data: [DONE]\n"))
+	}))
+	t.Cleanup(srv.Close)
+
+	prof := llm.Profile{Provider: llm.Provider{Name: "fake", BaseURL: srv.URL}, Model: "m"}
+	if err := New(prof, "sys").RunTurn(context.Background(), "hello", &recSink{}); err != nil {
+		t.Fatalf("RunTurn: %v", err)
+	}
+}
+
+func TestRunTurnRejectsDisabledToolCalls(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"test_echo","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}` + "\n\n" +
+			"data: [DONE]\n"))
+	}))
+	t.Cleanup(srv.Close)
+
+	prof := llm.Profile{
+		Provider: llm.Provider{Name: "fake", BaseURL: srv.URL},
+		Model:    "m", ToolsKnown: true,
+	}
+	c := New(prof, "sys")
+	sink := &recSink{}
+	err := c.RunTurn(context.Background(), "hello", sink)
+	if err == nil || !strings.Contains(err.Error(), "tools are disabled") {
+		t.Fatalf("disabled tool-call error = %v", err)
+	}
+	if len(sink.tools) != 0 || len(c.msgs) != 2 {
+		t.Fatalf("disabled tool call entered the transcript: sink=%v msgs=%+v", sink.tools, c.msgs)
+	}
+}
+
+func TestRunTurnRejectsCanceledEntryWithoutMutation(t *testing.T) {
+	prof := llm.Profile{Provider: llm.Provider{Name: "fake", BaseURL: "http://unused.invalid"}, Model: "m"}
+	c := New(prof, "sys")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := c.RunTurn(ctx, "must not stick", &recSink{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context cancellation, got: %v", err)
+	}
+	if len(c.msgs) != 1 {
+		t.Fatalf("canceled user message entered history: %+v", c.msgs)
+	}
+}
+
+func TestRunTurnRejectsInvalidUTF8(t *testing.T) {
+	prof := llm.Profile{Provider: llm.Provider{Name: "fake", BaseURL: "http://unused.invalid"}, Model: "m"}
+	bad := string([]byte{'a', 0xff, 'b'})
+
+	if err := New(prof, bad).RunTurn(context.Background(), "hello", &recSink{}); err == nil || !strings.Contains(err.Error(), "system prompt") {
+		t.Fatalf("invalid system prompt error = %v", err)
+	}
+	c := New(prof, "sys")
+	if err := c.RunTurn(context.Background(), bad, &recSink{}); err == nil || !strings.Contains(err.Error(), "user message") {
+		t.Fatalf("invalid user message error = %v", err)
+	}
+	if len(c.msgs) != 1 {
+		t.Fatalf("invalid user message entered history: %+v", c.msgs)
+	}
+}
+
+func TestRunTurnRejectsInvalidToolOutput(t *testing.T) {
+	tool.Register(tool.Tool{
+		Name: "test_invalid_utf8",
+		Run: func(context.Context, json.RawMessage) (string, error) {
+			return string([]byte{0xff}), nil
+		},
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"test_invalid_utf8","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}` + "\n\n" +
+			"data: [DONE]\n"))
+	}))
+	t.Cleanup(srv.Close)
+
+	prof := llm.Profile{Provider: llm.Provider{Name: "fake", BaseURL: srv.URL}, Model: "m"}
+	c := New(prof, "sys")
+	err := c.RunTurn(context.Background(), "run", &recSink{})
+	if err == nil || !strings.Contains(err.Error(), "invalid UTF-8") {
+		t.Fatalf("invalid tool output error = %v", err)
+	}
+	if len(c.msgs) != 4 || c.msgs[3].ToolCallID != "c1" || !strings.Contains(c.msgs[3].Content, "invalid UTF-8") {
+		t.Fatalf("invalid tool output left a broken exchange: %+v", c.msgs)
 	}
 }

@@ -17,9 +17,7 @@ func TestNormalizeModelID(t *testing.T) {
 		{"openai/gpt-5-pro-2025-10-06", "gpt-5-pro"},
 		{"GPT-5.2", "gpt-5.2"},
 		{"gpt-4-0613", "gpt-4-0613"},
-		// Colons are structural in fine-tune ids and must survive —
-		// stripping them collapsed every ft: model onto the key "ft".
-		// (":free" variant suffixes are handled in fetchORCatalog.)
+		// Fine-tune colons stay in the id.
 		{"ft:gpt-4o-mini-2024-07-18:acme::9abc", "ft:gpt-4o-mini-2024-07-18:acme::9abc"},
 		{"meta-llama/llama-3-70b:free", "llama-3-70b:free"},
 	}
@@ -67,12 +65,12 @@ func TestFetchORCatalog(t *testing.T) {
 	}
 }
 
-// A ":free" variant shares its base model's key; the base entry's
-// metadata must win no matter which the catalog lists first, because
-// variants routinely differ in context length and tool support.
+/*
+	The base model beats routing variants.
+*/
+
 func TestFetchORCatalogBaseBeatsVariant(t *testing.T) {
-	// Both orders: variant before base AND base before variant — a
-	// last-write-wins index passes one but not both.
+	// Cover both list orders.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"data":[
 			{"id":"deepseek/deepseek-r1:free","context_length":32000,
@@ -105,16 +103,18 @@ func TestFetchORCatalogBaseBeatsVariant(t *testing.T) {
 	if om := index["basefirst"]; om.ContextLength != 100000 || !contains(om.SupportedParameters, "tools") {
 		t.Fatalf("base-first ordering lost the base entry to its variant: %+v", om)
 	}
-	// A variant with no base entry still fills the key.
+	// A lone variant still fills the index.
 	if om := index["lonely"]; om.ContextLength != 8000 {
 		t.Fatalf("variant-only model missing from index: %+v", om)
 	}
 }
 
-// Dated snapshots collapse onto the base id's key; the undated base
-// entry's metadata must win regardless of listing order.
+/*
+	The base model beats dated snapshots.
+*/
+
 func TestFetchORCatalogDatedSnapshotNeverBeatsBase(t *testing.T) {
-	// Both orders again: snapshot-first and base-first.
+	// Cover both list orders.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"data":[
 			{"id":"openai/gpt-4o-2024-05-13","context_length":8000,
@@ -147,8 +147,10 @@ func TestFetchORCatalogDatedSnapshotNeverBeatsBase(t *testing.T) {
 	}
 }
 
-// A 200 that yields no entries (an error envelope, a changed shape) is
-// a failed authority and must be reported, not silently degrade.
+/*
+	Empty catalogs are errors.
+*/
+
 func TestFetchORCatalogEmptyIsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"error":{"code":429,"message":"rate limited"}}`))
@@ -161,6 +163,61 @@ func TestFetchORCatalogEmptyIsError(t *testing.T) {
 
 	if _, err := fetchORCatalog(context.Background()); err == nil {
 		t.Fatal("empty catalog must be reported as an error")
+	}
+}
+
+func TestFetchORCatalogHollowIsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"data":[{}]}`))
+	}))
+	defer srv.Close()
+
+	old := orModelsURL
+	orModelsURL = srv.URL
+	defer func() { orModelsURL = old }()
+
+	if _, err := fetchORCatalog(context.Background()); err == nil {
+		t.Fatal("hollow catalog must be reported as an error")
+	}
+}
+
+func TestFetchORCatalogSkipsHollowEntries(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"data":[{},
+			{"id":"openai/gpt-4o","context_length":128000,
+			 "architecture":{"modality":"text->text"}}
+		]}`))
+	}))
+	defer srv.Close()
+
+	old := orModelsURL
+	orModelsURL = srv.URL
+	defer func() { orModelsURL = old }()
+
+	index, err := fetchORCatalog(context.Background())
+	if err != nil {
+		t.Fatalf("fetchORCatalog: %v", err)
+	}
+	if len(index) != 1 || index["gpt-4o"].ContextLength != 128000 {
+		t.Fatalf("wrong index: %+v", index)
+	}
+	if _, ok := index[""]; ok {
+		t.Fatal("hollow entry reached the index")
+	}
+}
+
+func TestFetchORCatalogRejectsTrailingJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"data":[{"id":"openai/gpt-4o"}]}{"error":"upstream failed"}`))
+	}))
+	defer srv.Close()
+
+	old := orModelsURL
+	orModelsURL = srv.URL
+	defer func() { orModelsURL = old }()
+
+	if _, err := fetchORCatalog(context.Background()); err == nil {
+		t.Fatal("trailing JSON must error")
 	}
 }
 

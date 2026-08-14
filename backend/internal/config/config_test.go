@@ -6,9 +6,10 @@ import (
 	"testing"
 )
 
-// unset truly removes the variable for the test's duration. t.Setenv
-// alone cannot do this — it SETS the value (even "") — but calling it
-// first registers automatic restoration, after which Unsetenv is safe.
+/*
+	Removes a variable and restores it after the test.
+*/
+
 func unset(t *testing.T, key string) {
 	t.Helper()
 	t.Setenv(key, "sentinel-to-register-cleanup")
@@ -77,9 +78,10 @@ func TestLoadDotEnvDoesNotCorruptQuoteBearingValues(t *testing.T) {
 	}
 }
 
-// Values are LITERAL by contract: no escape processing, no inline
-// comment stripping. This pins the documented non-goals so a future
-// "improvement" is a conscious contract change, not drift.
+/*
+	Keeps dotenv values literal.
+*/
+
 func TestLoadDotEnvValuesAreLiteral(t *testing.T) {
 	path := writeEnv(t, "ESCAPED=\"p\\\"q\"\nHASH=sk-abc#not-a-comment\nexport\tTABBED=works\n")
 	for _, k := range []string{"ESCAPED", "HASH", "TABBED"} {

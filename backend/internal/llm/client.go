@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"unicode/utf8"
 )
 
 /*
@@ -20,8 +22,7 @@ var llmClient = &http.Client{}
 */
 
 type Message struct {
-	Role string `json:"role"`
-	// no omitempty: the APIs require the content key even when empty
+	Role       string     `json:"role"`
 	Content    string     `json:"content"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
@@ -84,8 +85,11 @@ func postChat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpe
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST",
-		prof.Provider.BaseURL+"/chat/completions", bytes.NewReader(body))
+	endpoint, err := url.JoinPath(prof.Provider.BaseURL, "chat/completions")
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +111,6 @@ func postChat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpe
 }
 
 type chatResponse struct {
-	// error envelopes can arrive on a 200, same as in streams
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
@@ -137,9 +140,11 @@ func Chat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec) (
 	if err != nil {
 		return Message{}, fmt.Errorf("read chat response: %w", err)
 	}
+	if !utf8.Valid(raw) {
+		return Message{}, fmt.Errorf("decode chat response: invalid UTF-8")
+	}
 	var cr chatResponse
 	if err := json.Unmarshal(raw, &cr); err != nil {
-		// some gateways send the error as a bare string, same as in streams
 		var alt struct {
 			Error string `json:"error"`
 		}
@@ -187,12 +192,32 @@ func completionErr(msg Message, finish string) error {
 	if finish == "" {
 		return fmt.Errorf("response ended without a finish reason (connection lost mid-response?)")
 	}
+	if msg.Role != "assistant" {
+		return fmt.Errorf("reply has role %q, want assistant", msg.Role)
+	}
 	if finish == "length" && len(msg.ToolCalls) > 0 {
 		return fmt.Errorf("hit the token limit mid tool-call; arguments are truncated")
 	}
+	if len(msg.ToolCalls) > 0 && finish != "tool_calls" {
+		return fmt.Errorf("reply carries tool calls with finish reason %q", finish)
+	}
+	if finish == "tool_calls" && len(msg.ToolCalls) == 0 {
+		return fmt.Errorf("reply ended for tool calls without carrying any")
+	}
+	ids := make(map[string]struct{}, len(msg.ToolCalls))
 	for _, c := range msg.ToolCalls {
 		if c.ID == "" || c.Function.Name == "" {
 			return fmt.Errorf("reply carries a tool call missing id or name")
+		}
+		if c.Type != "function" {
+			return fmt.Errorf("reply carries unsupported tool call type %q", c.Type)
+		}
+		if _, exists := ids[c.ID]; exists {
+			return fmt.Errorf("reply carries duplicate tool call id %q", c.ID)
+		}
+		ids[c.ID] = struct{}{}
+		if !json.Valid([]byte(c.Function.Arguments)) {
+			return fmt.Errorf("reply carries tool call %q with invalid JSON arguments", c.ID)
 		}
 	}
 	if msg.Content == "" && len(msg.ToolCalls) == 0 {

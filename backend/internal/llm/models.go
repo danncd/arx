@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -39,6 +40,7 @@ type ModelInfo struct {
 	ContextWindow int
 	Reasoning     bool
 	Tools         bool
+	ToolsKnown    bool
 }
 
 type modelList struct {
@@ -54,6 +56,13 @@ var nonChatMarkers = []string{
 	"embedding", "tts", "whisper", "audio", "transcribe", "image", "sora",
 	"realtime", "moderation", "search-api", "babbage", "davinci", "instruct",
 	"dall-e", "codex-mini", "computer-use",
+}
+
+func providerChatCapable(p Provider, id string) bool {
+	if p.Name == "openai" && strings.Contains(normalizeModelID(id), "-codex") {
+		return false
+	}
+	return chatCapable(id)
 }
 
 func chatCapable(id string) bool {
@@ -72,7 +81,11 @@ func chatCapable(id string) bool {
 */
 
 func ListModels(ctx context.Context, p Provider) ([]Model, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", p.BaseURL+"/models", nil)
+	endpoint, err := url.JoinPath(p.BaseURL, "models")
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -93,19 +106,30 @@ func ListModels(ctx context.Context, p Provider) ([]Model, error) {
 	}
 
 	var list modelList
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+	if err := decodeJSON(resp.Body, &list); err != nil {
 		return nil, fmt.Errorf("decode models: %w", err)
 	}
 	if list.Data == nil {
 		return nil, fmt.Errorf("%s /models: response carried no data field", p.Name)
 	}
-	return list.Data, nil
+	models := make([]Model, 0, len(list.Data))
+	for _, m := range list.Data {
+		if strings.TrimSpace(m.ID) == "" {
+			continue
+		}
+		models = append(models, m)
+	}
+	if len(list.Data) > 0 && len(models) == 0 {
+		return nil, fmt.Errorf("%s /models: every model entry is missing an id", p.Name)
+	}
+	return models, nil
 }
 
 /*
-LoadModels returns every chat-capable model across providers with keys.
-Partial results: models and an error can both come back.
+	LoadModels returns every chat-capable model across providers with keys.
+	Partial results: models and an error can both come back.
 */
+
 func LoadModels(ctx context.Context) ([]ModelInfo, error) {
 	var out []ModelInfo
 	var errs []error
@@ -136,16 +160,10 @@ func LoadModels(ctx context.Context) ([]ModelInfo, error) {
 				KeyEnv:   p.KeyEnv,
 			}
 
-			// The name veto applies to EVERY id: OpenRouter's modality
-			// says what tokens a model emits, not whether it is served
-			// by /chat/completions (gpt-3.5-turbo-instruct is
-			// text->text and still not a chat model).
-			if !chatCapable(m.ID) {
+			if !providerChatCapable(p, m.ID) {
 				continue
 			}
-			// Known to OpenRouter: modality decides when present (an
-			// empty one is schema drift, no verdict), and enrichment
-			// applies either way since those fields are independent.
+
 			om, known := or[normalizeModelID(m.ID)]
 			if known {
 				if mod := om.Architecture.Modality; mod != "" && !strings.HasSuffix(mod, "->text") {
@@ -153,11 +171,29 @@ func LoadModels(ctx context.Context) ([]ModelInfo, error) {
 				}
 				info.ContextWindow = om.ContextLength
 				info.Reasoning = contains(om.SupportedParameters, "reasoning")
-				info.Tools = contains(om.SupportedParameters, "tools")
+				if om.SupportedParameters != nil {
+					info.Tools = contains(om.SupportedParameters, "tools")
+					info.ToolsKnown = true
+				}
 			}
 			out = append(out, info)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Spec < out[j].Spec })
 	return out, errors.Join(errs...)
+}
+
+func decodeJSON(r io.Reader, v any) error {
+	dec := json.NewDecoder(r)
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	var extra json.RawMessage
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("multiple JSON values")
+		}
+		return fmt.Errorf("trailing JSON data: %w", err)
+	}
+	return nil
 }

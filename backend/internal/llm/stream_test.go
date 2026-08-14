@@ -13,6 +13,7 @@ import (
 func streamFrom(t *testing.T, body string) (Message, []string, error) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
 		w.Write([]byte(body))
 	}))
 	t.Cleanup(srv.Close)
@@ -206,5 +207,106 @@ data: [DONE]
 	}
 }
 
-// Chat shares Stream's completion contract: truncated tool calls and
-// empty replies must not be returned as success.
+func TestStreamRejectsExplicitWrongRole(t *testing.T) {
+	_, _, err := streamFrom(t, `data: {"choices":[{"delta":{"role":"user","content":"promoted"}}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+`)
+	if err == nil || !strings.Contains(err.Error(), "want assistant") {
+		t.Fatalf("wrong streamed role must error, got: %v", err)
+	}
+}
+
+func TestStreamRejectsExplicitToolType(t *testing.T) {
+	_, _, err := streamFrom(t, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","type":"custom","function":{"name":"current_time","arguments":"{}"}}]}}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+`)
+	if err == nil || !strings.Contains(err.Error(), "unsupported tool call type") {
+		t.Fatalf("unsupported streamed tool type must error, got: %v", err)
+	}
+}
+
+func TestStreamRejectsChoicesAfterFinish(t *testing.T) {
+	_, _, err := streamFrom(t, `data: {"choices":[{"delta":{"content":"No tool needed"},"finish_reason":"stop"}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"current_time","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+`)
+	if err == nil || !strings.Contains(err.Error(), "after finish reason") {
+		t.Fatalf("choices after finish must error, got: %v", err)
+	}
+}
+
+func TestStreamLimitsTotalBytes(t *testing.T) {
+	line := ": " + strings.Repeat("x", 64*1024) + "\n"
+	body := strings.Repeat(line, int(maxStreamBytes/int64(len(line)))+2)
+
+	_, _, err := streamFrom(t, body)
+	if err == nil || !strings.Contains(err.Error(), "exceeded") {
+		t.Fatalf("oversized stream must error, got: %v", err)
+	}
+}
+
+func TestStreamRejectsInvalidUTF8(t *testing.T) {
+	body := `data: {"choices":[{"delta":{"content":"` + string([]byte{0xff}) + `"}}]}` + "\n\n" +
+		`data: {"choices":[{"delta":{},"finish_reason":"stop"}]}` + "\n\n"
+
+	_, _, err := streamFrom(t, body)
+	if err == nil || !strings.Contains(err.Error(), "invalid UTF-8") {
+		t.Fatalf("invalid UTF-8 must error, got: %v", err)
+	}
+}
+
+func TestStreamSurfacesPlainJSONError(t *testing.T) {
+	cases := []string{
+		`{"error":{"message":"insufficient credits"}}`,
+		`{"error":"rate limited"}`,
+	}
+
+	for _, body := range cases {
+		_, _, err := streamFrom(t, body)
+		if err == nil || (!strings.Contains(err.Error(), "insufficient credits") && !strings.Contains(err.Error(), "rate limited")) {
+			t.Fatalf("plain JSON error lost: %v", err)
+		}
+	}
+}
+
+func TestStreamDoesNotMislabelLegalSSE(t *testing.T) {
+	_, _, err := streamFrom(t, ": keepalive\nx-proxy-heartbeat: 1\n\n")
+	if err == nil || !strings.Contains(err.Error(), "finish reason") || strings.Contains(err.Error(), "not SSE") {
+		t.Fatalf("legal SSE got the wrong error: %v", err)
+	}
+}
+
+func TestStreamAcceptsSSEFraming(t *testing.T) {
+	cases := map[string]string{
+		"bom": "\ufeff" + `data: {"choices":[{"delta":{"content":"hi"}}]}` + "\n\n" +
+			`data: {"choices":[{"delta":{},"finish_reason":"stop"}]}` + "\n\n" +
+			"data: [DONE]\n\n",
+		"cr": `data: {"choices":[{"delta":{"content":"hi"}}]}` + "\r\r" +
+			`data: {"choices":[{"delta":{},"finish_reason":"stop"}]}` + "\r\r" +
+			"data: [DONE]\r\r",
+		"multiline": `data: {"choices":[{"delta":` + "\n" +
+			`data: {"content":"hi"}}]}` + "\n\n" +
+			`data: {"choices":[{"delta":{},"finish_reason":"stop"}]}` + "\n\n" +
+			"data: [DONE]\n\n",
+	}
+
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			msg, _, err := streamFrom(t, body)
+			if err != nil {
+				t.Fatalf("Stream: %v", err)
+			}
+			if msg.Content != "hi" {
+				t.Fatalf("content = %q, want hi", msg.Content)
+			}
+		})
+	}
+}

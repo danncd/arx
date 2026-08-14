@@ -5,12 +5,11 @@ import (
 	"strings"
 )
 
-// LoadDotEnv reads KEY=VALUE lines from path and exports each into the
-// process environment, unless the variable already exists — a real
-// exported variable always beats the file, INCLUDING one exported
-// empty (blanking a key on purpose must stay blank). A missing file is
-// not an error: running without one is normal (e.g. keys arriving via
-// systemd). Shell-sourceable "export KEY=v" lines are accepted.
+/*
+	LoadDotEnv loads literal dotenv values and keeps existing variables.
+	Missing files are fine.
+*/
+
 func LoadDotEnv(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -19,13 +18,13 @@ func LoadDotEnv(path string) error {
 		}
 		return err
 	}
-	content := strings.TrimPrefix(string(data), "\ufeff") // editors love BOMs
+	content := strings.TrimPrefix(string(data), "\ufeff") // Strip an editor BOM.
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		// Shell-sourceable files write "export KEY=v" (space or tab).
+		// Accept export KEY=value.
 		if rest, ok := strings.CutPrefix(line, "export"); ok &&
 			len(rest) > 0 && (rest[0] == ' ' || rest[0] == '\t') {
 			line = strings.TrimSpace(rest)
@@ -36,11 +35,7 @@ func LoadDotEnv(path string) error {
 		}
 		k = strings.TrimSpace(k)
 		v = strings.TrimSpace(v)
-		// Strip exactly one BALANCED pair of quotes. A cutset Trim here
-		// ate unmatched trailing quote characters out of real secrets.
-		// Beyond that, values are LITERAL: no escape processing (\" and
-		// \n stay as typed) and no inline # comments (secrets may
-		// contain #). Full dotenv semantics are a non-goal.
+		// Strip one balanced quote pair.
 		if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
 			v = v[1 : len(v)-1]
 		}

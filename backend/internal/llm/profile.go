@@ -34,14 +34,14 @@ var Providers = map[string]Provider{
 	"openai":   {Name: "openai", BaseURL: "https://api.openai.com/v1", KeyEnv: "OPENAI_API_KEY", Dialect: OpenAI, NewTokenParam: true},
 }
 
-/*
-	Profile data structure, contains the provider, model and max tokens
-*/
+/* Profile data structure. */
 
 type Profile struct {
-	Provider  Provider
-	Model     string
-	MaxTokens int
+	Provider   Provider
+	Model      string
+	MaxTokens  int
+	Tools      bool
+	ToolsKnown bool
 }
 
 /*

@@ -2,7 +2,6 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -59,7 +58,7 @@ func fetchORCatalog(ctx context.Context) (map[string]orModel, error) {
 		return nil, fmt.Errorf("openrouter /models: HTTP %d", resp.StatusCode)
 	}
 	var list orList
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+	if err := decodeJSON(resp.Body, &list); err != nil {
 		return nil, fmt.Errorf("decode openrouter catalog: %w", err)
 	}
 	index := make(map[string]orModel, len(list.Data))
@@ -74,6 +73,9 @@ func fetchORCatalog(ctx context.Context) (map[string]orModel, error) {
 			variant = true
 		}
 		key := normalizeModelID(id)
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
 		if _, exists := index[key]; !exists || (isVariant[key] && !variant) {
 			index[key] = m
 			isVariant[key] = variant

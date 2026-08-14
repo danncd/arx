@@ -10,12 +10,12 @@ import (
 	"testing"
 )
 
-// Chat shares Stream's completion contract: truncated tool calls and
-// empty replies must not be returned as success.
+/*
+	Chat rejects unusable replies.
+*/
+
 func TestChatGuards(t *testing.T) {
-	// The fake inspects the request: path, headers, and the absence of
-	// the stream flag — a request-blind fake once let all of those
-	// mutate freely with the suite green.
+	// Check the request too.
 	t.Setenv("FAKE_KEY", "sk-test")
 	serve := func(body string) Profile {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -35,19 +35,17 @@ func TestChatGuards(t *testing.T) {
 			w.Write([]byte(body))
 		}))
 		t.Cleanup(srv.Close)
-		return Profile{Provider: Provider{Name: "fake", BaseURL: srv.URL, KeyEnv: "FAKE_KEY"}, Model: "m", MaxTokens: 100}
+		return Profile{Provider: Provider{Name: "fake", BaseURL: srv.URL + "/", KeyEnv: "FAKE_KEY"}, Model: "m", MaxTokens: 100}
 	}
 
-	// Happy path still works.
+	// Basic reply.
 	prof := serve(`{"choices":[{"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`)
 	msg, err := Chat(context.Background(), prof, []Message{{Role: "user", Content: "x"}}, nil)
 	if err != nil || msg.Content != "hi" {
 		t.Fatalf("happy path: msg=%+v err=%v", msg, err)
 	}
 
-	// Wire omissions are normalized exactly as Stream does: missing
-	// role becomes assistant, missing type becomes function, missing
-	// arguments become {}.
+	// Fill wire omissions.
 	prof = serve(`{"choices":[{"message":{"content":"","tool_calls":[{"id":"c1","function":{"name":"current_time"}}]},"finish_reason":"tool_calls"}]}`)
 	msg, err = Chat(context.Background(), prof, nil, nil)
 	if err != nil {
@@ -57,41 +55,86 @@ func TestChatGuards(t *testing.T) {
 		t.Fatalf("reply not normalized: %+v", msg)
 	}
 
-	// A 200 carrying an error envelope must surface the provider's
-	// words, not "empty choices".
+	// Object error.
 	prof = serve(`{"error":{"message":"Insufficient Balance"}}`)
 	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "Insufficient Balance") {
 		t.Fatalf("error envelope lost: %v", err)
 	}
 
-	// Empty choices must error, not panic on Choices[0].
+	// No choices.
 	prof = serve(`{"choices":[]}`)
 	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "empty choices") {
 		t.Fatalf("empty choices: %v", err)
 	}
 
-	// A bare-string error envelope surfaces the provider's words too.
+	// String error.
 	prof = serve(`{"error":"rate limited, retry later"}`)
 	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "rate limited, retry later") {
 		t.Fatalf("string error envelope lost: %v", err)
 	}
 
-	// Token limit mid tool-call: truncated arguments.
+	// Truncated call.
 	prof = serve(`{"choices":[{"message":{"role":"assistant","content":"","tool_calls":[{"id":"c1","type":"function","function":{"name":"t","arguments":"{\"city\":\"San Fr"}}]},"finish_reason":"length"}]}`)
 	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "token limit") {
 		t.Fatalf("truncated tool call must error, got: %v", err)
 	}
 
-	// Empty reply (budget spent on reasoning).
+	// Empty answer.
 	prof = serve(`{"choices":[{"message":{"role":"assistant","content":""},"finish_reason":"length"}]}`)
 	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "no output") {
 		t.Fatalf("empty reply must error, got: %v", err)
 	}
+
+	// Invalid arguments.
+	prof = serve(`{"choices":[{"message":{"tool_calls":[{"id":"c1","function":{"name":"current_time","arguments":"{"}}]},"finish_reason":"tool_calls"}]}`)
+	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "invalid JSON") {
+		t.Fatalf("invalid tool arguments must error, got: %v", err)
+	}
+
+	// Unsupported call type.
+	prof = serve(`{"choices":[{"message":{"tool_calls":[{"id":"c1","type":"custom","function":{"name":"current_time","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`)
+	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "unsupported tool call type") {
+		t.Fatalf("unsupported tool call type must error, got: %v", err)
+	}
+
+	// Call with a text finish.
+	prof = serve(`{"choices":[{"message":{"tool_calls":[{"id":"c1","type":"function","function":{"name":"current_time","arguments":"{}"}}]},"finish_reason":"stop"}]}`)
+	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "finish reason") {
+		t.Fatalf("mismatched tool call finish must error, got: %v", err)
+	}
+
+	// Tool finish without a call.
+	prof = serve(`{"choices":[{"message":{"content":"hi"},"finish_reason":"tool_calls"}]}`)
+	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "without carrying any") {
+		t.Fatalf("missing tool calls must error, got: %v", err)
+	}
+
+	// Duplicate call ids.
+	prof = serve(`{"choices":[{"message":{"tool_calls":[
+		{"id":"c1","type":"function","function":{"name":"first","arguments":"{}"}},
+		{"id":"c1","type":"function","function":{"name":"second","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`)
+	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "duplicate tool call id") {
+		t.Fatalf("duplicate tool call ids must error, got: %v", err)
+	}
+
+	// Invalid UTF-8.
+	badUTF8 := `{"choices":[{"message":{"tool_calls":[{"id":"c1","function":{"name":"current_time","arguments":"{\"key\":\"` + string([]byte{0xff}) + `\"}"}}]},"finish_reason":"tool_calls"}]}`
+	prof = serve(badUTF8)
+	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "invalid UTF-8") {
+		t.Fatalf("invalid UTF-8 must error, got: %v", err)
+	}
+
+	// Wrong role.
+	prof = serve(`{"choices":[{"message":{"role":"system","content":"promoted"},"finish_reason":"stop"}]}`)
+	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "want assistant") {
+		t.Fatalf("wrong reply role must error, got: %v", err)
+	}
 }
 
-// A non-200 must come back as an error carrying the status and the
-// provider's explanation (the ListModels twin of this was pinned long
-// ago; the chat path wasn't).
+/*
+	Returns the status and provider error.
+*/
+
 func TestChatSurfacesHTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -106,9 +149,10 @@ func TestChatSurfacesHTTPError(t *testing.T) {
 	}
 }
 
-// The token cap must go out under the spelling each provider accepts:
-// classic "max_tokens" for deepseek, "max_completion_tokens" for openai.
-// Exactly one of the two may appear on the wire.
+/*
+	Uses each provider's token field.
+*/
+
 func TestBuildRequestTokenParam(t *testing.T) {
 	msgs := []Message{{Role: "user", Content: "hi"}}
 
@@ -129,8 +173,7 @@ func TestBuildRequestTokenParam(t *testing.T) {
 	if !strings.Contains(string(b), `"max_completion_tokens":8192`) {
 		t.Fatalf("openai request missing max_completion_tokens: %s", b)
 	}
-	// "max_completion_tokens" contains "max_tokens" as a substring, so
-	// check for the classic key's quoted form specifically.
+	// Match the full old field name.
 	if strings.Contains(string(b), `"max_tokens"`) {
 		t.Fatalf("openai request still carries classic max_tokens: %s", b)
 	}
@@ -139,9 +182,10 @@ func TestBuildRequestTokenParam(t *testing.T) {
 	}
 }
 
-// Wire names are load-bearing: an untagged field silently marshals
-// under its Go name and the API ignores it. This has bitten three
-// times (tools, tool_calls, stream) — pin the whole message shape.
+/*
+	Keeps message field names stable.
+*/
+
 func TestMessageMarshalsToWireNames(t *testing.T) {
 	m := Message{
 		Role: "assistant",
@@ -170,8 +214,10 @@ func TestMessageMarshalsToWireNames(t *testing.T) {
 	}
 }
 
-// The request and tool-spec wire tags, pinned the same way: a renamed
-// tag ships a key the API silently ignores.
+/*
+	Keeps request field names stable.
+*/
+
 func TestRequestMarshalsToWireNames(t *testing.T) {
 	classic, _ := GetProvider("deepseek")
 	req := buildRequest(
