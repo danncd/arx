@@ -33,11 +33,10 @@ func isTerminal() bool {
 }
 
 var (
-	headerBase = lipgloss.NewStyle().
-			Background(lipgloss.Color("#2ea77a")). // Arx jade
-			Foreground(lipgloss.Color("#121212"))
+	headerBase  = lipgloss.NewStyle()
 	headerBrand = headerBase.Bold(true).
-			Foreground(lipgloss.Color("#f0f0f0"))
+			Foreground(lipgloss.Color("#34bf8c"))
+	headerDim  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	userStyle  = lipgloss.NewStyle().Bold(true)
 	thinkStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	failStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
@@ -170,9 +169,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) View() string {
 	brand := headerBrand.Render(" Arx ")
-	rest := headerBase.Render("· " + m.header + " ")
-	pad := max(m.width-lipgloss.Width(brand+rest), 0)
-	header := brand + rest + headerBase.Render(strings.Repeat(" ", pad))
+	rest := headerDim.Render("· " + m.header + " ")
+	header := brand + rest
 	sep := sepStyle.Render(strings.Repeat("─", max(m.width, 8)))
 	return "\n" +
 		header + "\n" +
@@ -191,7 +189,7 @@ func runTUI(ctrl *agent.Controller, prof llm.Profile) error {
 
 	m := model{
 		ctrl:   ctrl,
-		header: prof.Provider.Name + "/" + prof.Model + " · ctrl-c to leave",
+		header: prof.Model + " · ctrl-c to leave",
 		vp:     viewport.New(80, 22),
 		ti:     ti,
 		sh:     &shared{},
