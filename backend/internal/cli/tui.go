@@ -263,7 +263,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
-		m.vp.Width = max(msg.Width-2, 1)   // gap + scrollbar own the right edge
+		m.vp.Width = max(msg.Width-1, 1)   // the right column belongs to the scrollbar
 		m.vp.Height = max(msg.Height-5, 0) // padding, header, separators, input, padding
 		m.ti.Width = max(msg.Width-5, 8)
 		m.mdr = newRenderer(m.vp.Width)
@@ -366,7 +366,7 @@ func (m model) scrollbar() string {
 			if i > 0 {
 				b.WriteByte('\n')
 			}
-			b.WriteString("  ")
+			b.WriteByte(' ')
 		}
 		return b.String()
 	}
@@ -376,7 +376,6 @@ func (m model) scrollbar() string {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
-		b.WriteByte(' ') // breathing room between the chat and the bar
 		if i >= pos && i < pos+thumb {
 			b.WriteString(sbThumb)
 		} else {
