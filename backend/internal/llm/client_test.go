@@ -46,14 +46,28 @@ func TestChatGuards(t *testing.T) {
 	}
 
 	// Wire omissions are normalized exactly as Stream does: missing
-	// role becomes assistant, missing arguments become {}.
-	prof = serve(`{"choices":[{"message":{"content":"","tool_calls":[{"id":"c1","type":"function","function":{"name":"current_time"}}]},"finish_reason":"tool_calls"}]}`)
+	// role becomes assistant, missing type becomes function, missing
+	// arguments become {}.
+	prof = serve(`{"choices":[{"message":{"content":"","tool_calls":[{"id":"c1","function":{"name":"current_time"}}]},"finish_reason":"tool_calls"}]}`)
 	msg, err = Chat(context.Background(), prof, nil, nil)
 	if err != nil {
 		t.Fatalf("zero-arg tool call: %v", err)
 	}
-	if msg.Role != "assistant" || msg.ToolCalls[0].Function.Arguments != "{}" {
+	if msg.Role != "assistant" || msg.ToolCalls[0].Type != "function" || msg.ToolCalls[0].Function.Arguments != "{}" {
 		t.Fatalf("reply not normalized: %+v", msg)
+	}
+
+	// A 200 carrying an error envelope must surface the provider's
+	// words, not "empty choices".
+	prof = serve(`{"error":{"message":"Insufficient Balance"}}`)
+	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "Insufficient Balance") {
+		t.Fatalf("error envelope lost: %v", err)
+	}
+
+	// Empty choices must error, not panic on Choices[0].
+	prof = serve(`{"choices":[]}`)
+	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "empty choices") {
+		t.Fatalf("empty choices: %v", err)
 	}
 
 	// Token limit mid tool-call: truncated arguments.
@@ -66,6 +80,23 @@ func TestChatGuards(t *testing.T) {
 	prof = serve(`{"choices":[{"message":{"role":"assistant","content":""},"finish_reason":"length"}]}`)
 	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "no output") {
 		t.Fatalf("empty reply must error, got: %v", err)
+	}
+}
+
+// A non-200 must come back as an error carrying the status and the
+// provider's explanation (the ListModels twin of this was pinned long
+// ago; the chat path wasn't).
+func TestChatSurfacesHTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":{"message":"invalid api key"}}`))
+	}))
+	t.Cleanup(srv.Close)
+	prof := Profile{Provider: Provider{Name: "fake", BaseURL: srv.URL}, Model: "m", MaxTokens: 100}
+
+	_, err := Chat(context.Background(), prof, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "401") || !strings.Contains(err.Error(), "invalid api key") {
+		t.Fatalf("want status and body in the error, got: %v", err)
 	}
 }
 

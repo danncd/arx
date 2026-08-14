@@ -99,7 +99,7 @@ func TestLoadModelsAuthorityFilter(t *testing.T) {
 	prov := providerServing(t,
 		"chat-model", "tool-model", "video-model", "img-out-model",
 		"unknown-model", "whisper-native", "turbo-instruct",
-		"CHAT-MODEL-2025-01-01")
+		"CHAT-MODEL-2025-01-01", "drift-model")
 	or := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"data":[
 			{"id":"fake/chat-model","context_length":128000,
@@ -113,7 +113,9 @@ func TestLoadModelsAuthorityFilter(t *testing.T) {
 			{"id":"fake/img-out-model",
 			 "architecture":{"modality":"text->text+image"}},
 			{"id":"fake/turbo-instruct","context_length":4095,
-			 "architecture":{"modality":"text->text"}}
+			 "architecture":{"modality":"text->text"}},
+			{"id":"fake/drift-model","context_length":99000,
+			 "supported_parameters":["tools"],"architecture":null}
 		]}`))
 	}))
 	t.Cleanup(or.Close)
@@ -132,8 +134,14 @@ func TestLoadModelsAuthorityFilter(t *testing.T) {
 			t.Fatalf("%s must be dropped: %+v", dropped, models)
 		}
 	}
-	if len(models) != 4 {
-		t.Fatalf("want 4 survivors, got: %+v", models)
+	if len(models) != 5 {
+		t.Fatalf("want 5 survivors, got: %+v", models)
+	}
+	// Schema drift: a known entry with no architecture keeps the model
+	// AND its independent enrichment fields.
+	drift := byName["drift-model"]
+	if drift.ContextWindow != 99000 || !drift.Tools {
+		t.Fatalf("drifted entry lost its enrichment: %+v", drift)
 	}
 	chat := byName["chat-model"]
 	if chat.ContextWindow != 128000 || !chat.Reasoning || chat.Tools {
@@ -227,6 +235,32 @@ func TestListModelsRejectsMissingDataKey(t *testing.T) {
 	_, err := ListModels(context.Background(), Provider{Name: "fake", BaseURL: srv.URL})
 	if err == nil || !strings.Contains(err.Error(), "no data field") {
 		t.Fatalf("missing data key must error, got: %v", err)
+	}
+}
+
+// A provider whose key env is set but empty is skipped without being
+// queried and without an error — keyless is normal, not a failure.
+func TestLoadModelsSkipsKeylessProviders(t *testing.T) {
+	prov := providerServing(t, "chat-model")
+	nokey := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Error("keyless provider must not be queried")
+	}))
+	t.Cleanup(nokey.Close)
+	or := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"data":[{"id":"fake/chat-model","context_length":1000,
+			"architecture":{"modality":"text->text"}}]}`))
+	}))
+	t.Cleanup(or.Close)
+	withFakeWorld(t, prov.URL, or.URL)
+	Providers["nokey"] = Provider{Name: "nokey", BaseURL: nokey.URL, KeyEnv: "ARX_TEST_UNSET_KEY"}
+	t.Setenv("ARX_TEST_UNSET_KEY", "")
+
+	models, err := LoadModels(context.Background())
+	if err != nil {
+		t.Fatalf("a skipped provider is not an error: %v", err)
+	}
+	if len(models) != 1 || models[0].Model != "chat-model" {
+		t.Fatalf("want only the keyed provider's model: %+v", models)
 	}
 }
 

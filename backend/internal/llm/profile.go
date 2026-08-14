@@ -49,9 +49,10 @@ type Profile struct {
 */
 
 func Parse(spec string) (Profile, error) {
-	prov, model, ok := strings.Cut(spec, "/")
+	prov, model, ok := strings.Cut(strings.TrimSpace(spec), "/")
+	model = strings.TrimSpace(model)
 
-	if !ok || strings.TrimSpace(model) == "" {
+	if !ok || model == "" {
 		return Profile{}, fmt.Errorf("model spec %q: want provider/model", spec)
 	}
 

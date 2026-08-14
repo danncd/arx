@@ -143,12 +143,12 @@ func LoadModels(ctx context.Context) ([]ModelInfo, error) {
 			if !chatCapable(m.ID) {
 				continue
 			}
-			// Known to OpenRouter with a modality: it decides, and the
-			// model gets enriched. An empty modality is schema drift,
-			// treated as unknown rather than as "not a chat model".
+			// Known to OpenRouter: modality decides when present (an
+			// empty one is schema drift, no verdict), and enrichment
+			// applies either way since those fields are independent.
 			om, known := or[normalizeModelID(m.ID)]
-			if known && om.Architecture.Modality != "" {
-				if !strings.HasSuffix(om.Architecture.Modality, "->text") {
+			if known {
+				if mod := om.Architecture.Modality; mod != "" && !strings.HasSuffix(mod, "->text") {
 					continue
 				}
 				info.ContextWindow = om.ContextLength

@@ -107,6 +107,10 @@ func postChat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpe
 }
 
 type chatResponse struct {
+	// error envelopes can arrive on a 200, same as in streams
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
 	Choices []struct {
 		Message      Message `json:"message"`
 		FinishReason string  `json:"finish_reason"`
@@ -133,6 +137,9 @@ func Chat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec) (
 	if err := json.NewDecoder(resp.Body).Decode(&cr); err != nil {
 		return Message{}, fmt.Errorf("decode chat response: %w", err)
 	}
+	if cr.Error != nil {
+		return Message{}, fmt.Errorf("%s chat error: %s", prof.Provider.Name, cr.Error.Message)
+	}
 	if len(cr.Choices) == 0 {
 		return Message{}, fmt.Errorf("%s chat: empty choices", prof.Provider.Name)
 	}
@@ -151,6 +158,9 @@ func normalizeReply(m *Message) {
 		m.Role = "assistant"
 	}
 	for i := range m.ToolCalls {
+		if m.ToolCalls[i].Type == "" {
+			m.ToolCalls[i].Type = "function"
+		}
 		if m.ToolCalls[i].Function.Arguments == "" {
 			m.ToolCalls[i].Function.Arguments = "{}"
 		}

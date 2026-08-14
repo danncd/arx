@@ -40,6 +40,20 @@ func TestParse(t *testing.T) {
 	if p.Model != "org/model" {
 		t.Fatalf("model = %q, want org/model", p.Model)
 	}
+
+	// An empty or whitespace model half is a malformed spec.
+	if _, err := Parse("deepseek/"); err == nil {
+		t.Fatal("empty model half must fail")
+	}
+	if _, err := Parse("deepseek/   "); err == nil {
+		t.Fatal("whitespace model half must fail")
+	}
+	// Whitespace that survives validation must not survive storage:
+	// a padded env value would 400 with "model not exist" forever.
+	p, err = Parse("  deepseek/deepseek-v4-flash  ")
+	if err != nil || p.Model != "deepseek-v4-flash" {
+		t.Fatalf("padded spec not trimmed: %+v err=%v", p, err)
+	}
 }
 
 func TestKey(t *testing.T) {
