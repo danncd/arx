@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -85,18 +86,20 @@ type span struct {
 }
 
 type model struct {
-	ctrl    *agent.Controller
-	header  string
-	spans   []span
-	baked   string // rendered cache of spans
-	cur     string // the streaming answer, raw markdown
-	mdr     *glamour.TermRenderer
-	waiting bool
-	inThink bool // a reasoning block is open and needs closing
-	width   int
-	vp      viewport.Model
-	ti      textinput.Model
-	sh      *shared
+	ctrl       *agent.Controller
+	header     string
+	spans      []span
+	baked      string // rendered cache of spans
+	cur        string // the streaming answer, raw markdown
+	mdr        *glamour.TermRenderer
+	waiting    bool
+	inThink    bool // a reasoning block is open and needs closing
+	thinkIdx   int  // span index of the block's label, -1 when none
+	thinkStart time.Time
+	width      int
+	vp         viewport.Model
+	ti         textinput.Model
+	sh         *shared
 }
 
 func (m model) Init() tea.Cmd { return textinput.Blink }
@@ -190,9 +193,16 @@ func (m *model) rebake() {
 /* Closes an open reasoning block so the answer starts on its own line. */
 
 func (m *model) endThink() {
-	if m.inThink {
-		m.inThink = false
-		m.push("\n\n") // close the block, then a blank row before what follows
+	if !m.inThink {
+		return
+	}
+	m.inThink = false
+	m.push("\n\n") // close the block, then a blank row before what follows
+	if m.thinkIdx >= 0 && m.thinkIdx < len(m.spans) {
+		d := time.Since(m.thinkStart).Seconds()
+		m.spans[m.thinkIdx].text = thinkStyle.Render(fmt.Sprintf(" Thought for %.1f seconds", d)) + "\n"
+		m.thinkIdx = -1
+		m.rebake()
 	}
 }
 
@@ -246,10 +256,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.thinking {
 			text := msg.text
 			if !m.inThink {
-				text = " " + text // indent the reasoning block
+				// Open the block: a label span of its own (so endThink
+				// can rewrite it) followed by the gutter.
+				m.inThink = true
+				m.thinkStart = time.Now()
+				label := thinkStyle.Render(" Thinking…") + "\n"
+				m.spans = append(m.spans, span{text: label})
+				m.thinkIdx = len(m.spans) - 1
+				m.baked += label
+				text = " │ " + text
 			}
-			text = strings.ReplaceAll(text, "\n", "\n ")
-			m.inThink = true
+			text = strings.ReplaceAll(text, "\n", "\n │ ")
 			m.push(thinkStyle.Render(text))
 		} else {
 			m.endThink()
@@ -305,13 +322,14 @@ func runTUI(ctrl *agent.Controller, prof llm.Profile) error {
 	ti.Focus()
 
 	m := model{
-		ctrl:   ctrl,
-		header: prof.Model + " · ctrl-c to leave",
-		spans:  []span{{text: "\n"}}, // breathing room above the first message
-		baked:  "\n",
-		vp:     viewport.New(80, 22),
-		ti:     ti,
-		sh:     &shared{},
+		ctrl:     ctrl,
+		header:   prof.Model + " · ctrl-c to leave",
+		spans:    []span{{text: "\n"}}, // breathing room above the first message
+		baked:    "\n",
+		thinkIdx: -1,
+		vp:       viewport.New(80, 22),
+		ti:       ti,
+		sh:       &shared{},
 	}
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	m.sh.p = p
