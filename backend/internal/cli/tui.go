@@ -72,6 +72,7 @@ type model struct {
 	header  string
 	raw     string // the transcript with styles, re-wrapped on resize
 	waiting bool
+	inThink bool // a reasoning block is open and needs closing
 	width   int
 	vp      viewport.Model
 	ti      textinput.Model
@@ -92,6 +93,15 @@ func (m *model) push(s string) {
 	m.vp.SetContent(lipgloss.NewStyle().Width(max(m.width, 8)).Render(m.raw))
 	if follow {
 		m.vp.GotoBottom()
+	}
+}
+
+/* Closes an open reasoning block so the answer starts on its own line. */
+
+func (m *model) endThink() {
+	if m.inThink {
+		m.inThink = false
+		m.push("\n")
 	}
 }
 
@@ -119,7 +129,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.ti.Reset()
 			m.waiting = true
-			m.push(userMark.Render("● » ") + userStyle.Render(text) + "\n")
+			m.push(userMark.Render("● » ") + userStyle.Render(text) + "\n\n")
 			m.vp.GotoBottom() // sending always jumps to the latest
 			ctx, cancel := context.WithCancel(context.Background())
 			m.sh.cancel = cancel
@@ -142,17 +152,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tokenMsg:
 		if msg.thinking {
+			m.inThink = true
 			m.push(thinkStyle.Render(msg.text))
 		} else {
+			m.endThink()
 			m.push(msg.text)
 		}
 
 	case toolMsg:
+		m.endThink()
 		m.push("  [" + msg.name + "] → " + msg.out + "\n")
 
 	case doneMsg:
 		m.waiting = false
 		m.sh.cancel = nil
+		m.endThink()
 		switch {
 		case errors.Is(msg.err, agent.ErrStepLimit):
 			m.push(failStyle.Render("arx: step limit reached before a final answer") + "\n\n")
