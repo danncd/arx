@@ -53,18 +53,37 @@ func Run() error {
 	}
 	tool.Register(tool.Clock)
 	ctrl := agent.New(prof, systemPrompt)
+
+	// A real terminal gets the fullscreen layout; pipes keep the plain
+	// read-run-print loop so scripting and tests stay possible.
+	var scr *screen
+	if isTerminal() {
+		scr = openScreen()
+		defer scr.close()
+		scr.chat()
+	}
 	fmt.Printf("arx — %s/%s · ctrl-d to leave\n", prof.Provider.Name, prof.Model)
 
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 0, 64*1024), 4*1024*1024) // large pastes stay valid input
 	for {
-		fmt.Print("> ")
+		if scr != nil {
+			scr.prompt()
+		} else {
+			fmt.Print("> ")
+		}
 		if !in.Scan() {
 			break
 		}
 		text := strings.TrimSpace(in.Text())
 		if text == "" {
 			continue
+		}
+		if scr != nil {
+			// Back into the chat region: echo the question so it
+			// persists, then stream the turn below it.
+			scr.chat()
+			fmt.Print("\033[1m› " + text + "\033[0m\n")
 		}
 		switch err := ctrl.RunTurn(context.Background(), text, terminalSink{}); {
 		case errors.Is(err, agent.ErrStepLimit):
