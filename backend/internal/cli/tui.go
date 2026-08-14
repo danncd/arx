@@ -219,6 +219,16 @@ func (m *model) rebake() {
 	m.setView()
 }
 
+/* Compact duration: 0s, 45s, 1m 20s. */
+
+func thinkDuration(d time.Duration) string {
+	secs := int(d.Round(time.Second).Seconds())
+	if secs < 60 {
+		return fmt.Sprintf("%ds", secs)
+	}
+	return fmt.Sprintf("%dm %ds", secs/60, secs%60)
+}
+
 /* Closes an open reasoning block so the answer starts on its own line. */
 
 func (m *model) endThink() {
@@ -231,12 +241,7 @@ func (m *model) endThink() {
 	m.curThink = ""
 	m.push("\n\n") // close the block, then a blank row before what follows
 	if m.thinkIdx >= 0 && m.thinkIdx < len(m.spans) {
-		secs := max(int(time.Since(m.thinkStart).Round(time.Second).Seconds()), 1)
-		unit := "seconds"
-		if secs == 1 {
-			unit = "second"
-		}
-		m.spans[m.thinkIdx].text = thinkStyle.Render(fmt.Sprintf(" Thought for %d %s", secs, unit)) + "\n"
+		m.spans[m.thinkIdx].text = thinkStyle.Render(" Thought for "+thinkDuration(time.Since(m.thinkStart))) + "\n"
 		m.thinkIdx = -1
 	}
 	m.rebake()
