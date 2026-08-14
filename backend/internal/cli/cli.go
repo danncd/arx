@@ -54,21 +54,20 @@ func Run() error {
 	tool.Register(tool.Clock)
 	ctrl := agent.New(prof, systemPrompt)
 
-	// A real terminal gets the fullscreen layout; pipes keep the plain
+	// A real terminal gets the pinned-bar layout; pipes keep the plain
 	// read-run-print loop so scripting and tests stay possible.
-	var scr *screen
+	var ui *tui
 	if isTerminal() {
-		scr = openScreen()
-		defer scr.close()
-		scr.chat()
+		ui = openTUI()
+		defer ui.close()
 	}
 	fmt.Printf("arx — %s/%s · ctrl-d to leave\n", prof.Provider.Name, prof.Model)
 
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 0, 64*1024), 4*1024*1024) // large pastes stay valid input
 	for {
-		if scr != nil {
-			scr.prompt()
+		if ui != nil {
+			ui.prompt()
 		} else {
 			fmt.Print("> ")
 		}
@@ -79,10 +78,10 @@ func Run() error {
 		if text == "" {
 			continue
 		}
-		if scr != nil {
-			// Back into the chat region: echo the question so it
-			// persists, then stream the turn below it.
-			scr.chat()
+		if ui != nil {
+			// Back to the transcript: echo the question so it persists,
+			// then the turn streams below it.
+			ui.transcript()
 			fmt.Print("\033[1m› " + text + "\033[0m\n")
 		}
 		switch err := ctrl.RunTurn(context.Background(), text, terminalSink{}); {
