@@ -40,7 +40,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	prof, err := llm.Parse("deepseek/deepseek-v4-flash")
+	spec := os.Getenv("ARX_MODEL")
+	if spec == "" {
+		spec = "deepseek/deepseek-v4-flash"
+	}
+	prof, err := llm.Parse(spec)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "arx:", err)
 		os.Exit(1)

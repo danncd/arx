@@ -17,11 +17,14 @@ type Provider struct {
 	BaseURL string
 	KeyEnv  string
 	Dialect Dialect
+	// NewTokenParam marks providers that want "max_completion_tokens"
+	// (OpenAI's reasoning-era name) instead of the classic "max_tokens".
+	NewTokenParam bool
 }
 
 var Providers = map[string]Provider{
 	"deepseek": {Name: "deepseek", BaseURL: "https://api.deepseek.com", KeyEnv: "DEEPSEEK_API_KEY", Dialect: OpenAI},
-	"openai":   {Name: "openai", BaseURL: "https://api.openai.com/v1", KeyEnv: "OPENAI_API_KEY", Dialect: OpenAI},
+	"openai":   {Name: "openai", BaseURL: "https://api.openai.com/v1", KeyEnv: "OPENAI_API_KEY", Dialect: OpenAI, NewTokenParam: true},
 }
 
 type Profile struct {

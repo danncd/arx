@@ -41,11 +41,24 @@ type ToolFunction struct {
 }
 
 type chatRequest struct {
-	Model     string     `json:"model"`
-	Messages  []Message  `json:"messages"`
-	MaxTokens int        `json:"max_tokens,omitempty"`
-	Tools     []ToolSpec `json:"tools,omitempty"`
-	Stream    bool       `json:"stream,omitempty"`
+	Model               string     `json:"model"`
+	Messages            []Message  `json:"messages"`
+	MaxTokens           int        `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int        `json:"max_completion_tokens,omitempty"`
+	Tools               []ToolSpec `json:"tools,omitempty"`
+	Stream              bool       `json:"stream,omitempty"`
+}
+
+// buildRequest fills the token cap under the spelling the provider
+// accepts; omitempty drops the unused one from the wire.
+func buildRequest(prof Profile, msgs []Message, tools []ToolSpec, stream bool) chatRequest {
+	r := chatRequest{Model: prof.Model, Messages: msgs, Tools: tools, Stream: stream}
+	if prof.Provider.NewTokenParam {
+		r.MaxCompletionTokens = prof.MaxTokens
+	} else {
+		r.MaxTokens = prof.MaxTokens
+	}
+	return r
 }
 
 type chatResponse struct {
@@ -75,12 +88,7 @@ type streamChunk struct {
 }
 
 func Chat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec) (Message, error) {
-	body, err := json.Marshal(chatRequest{
-		Model:     prof.Model,
-		Messages:  msgs,
-		MaxTokens: prof.MaxTokens,
-		Tools:     tools,
-	})
+	body, err := json.Marshal(buildRequest(prof, msgs, tools, false))
 	if err != nil {
 		return Message{}, err
 	}
@@ -121,13 +129,7 @@ func Chat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec) (
 // DeepSeek and a waste of context). The fully assembled message, tool
 // calls included, is returned at the end exactly as Chat would.
 func Stream(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec, onToken func(s string, thinking bool)) (Message, error) {
-	body, err := json.Marshal(chatRequest{
-		Model:     prof.Model,
-		Messages:  msgs,
-		MaxTokens: prof.MaxTokens,
-		Tools:     tools,
-		Stream:    true,
-	})
+	body, err := json.Marshal(buildRequest(prof, msgs, tools, true))
 	if err != nil {
 		return Message{}, err
 	}
