@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 
 	"arx/internal/agent"
@@ -67,10 +68,28 @@ type shared struct {
 	cancel context.CancelFunc
 }
 
+/*
+	The transcript is a list of spans: chrome (pre-styled text — user
+	lines, thinking, tool runs) passes through verbatim, while markdown
+	spans are the model's answers, rendered by glamour. Completed spans
+	are baked into a cached string; the answer currently streaming
+	stays raw in cur and is re-rendered on every token, so formatting
+	appears live. A resize rebuilds the renderer and re-bakes it all
+	at the new width.
+*/
+
+type span struct {
+	md   bool
+	text string
+}
+
 type model struct {
 	ctrl    *agent.Controller
 	header  string
-	raw     string // the transcript with styles, re-wrapped on resize
+	spans   []span
+	baked   string // rendered cache of spans
+	cur     string // the streaming answer, raw markdown
+	mdr     *glamour.TermRenderer
 	waiting bool
 	inThink bool // a reasoning block is open and needs closing
 	width   int
@@ -81,19 +100,86 @@ type model struct {
 
 func (m model) Init() tea.Cmd { return textinput.Blink }
 
+func newRenderer(width int) *glamour.TermRenderer {
+	// WithStandardStyle, not WithAutoStyle: auto probes the terminal
+	// through stdin and the probe races the keyboard, eating keystrokes.
+	r, err := glamour.NewTermRenderer(
+		glamour.WithStandardStyle("dark"),
+		glamour.WithWordWrap(max(width-2, 8)),
+	)
+	if err != nil {
+		return nil
+	}
+	return r
+}
+
+/* Markdown to ANSI; raw text when the renderer is unavailable. */
+
+func (m *model) renderMD(s string) string {
+	if m.mdr == nil {
+		return s
+	}
+	out, err := m.mdr.Render(s)
+	if err != nil {
+		return s
+	}
+	return strings.Trim(out, "\n") + "\n"
+}
+
 /*
-	Appends to the transcript. Follow-mode: the view sticks to the tail
-	only while it is already there, so scrolling up during generation
-	holds your place; returning to the bottom re-engages the follow.
+	Sets the viewport from the baked transcript plus the live tail.
+	Follow-mode: the view sticks to the bottom only while it is already
+	there, so scrolling up during generation holds your place.
 */
 
-func (m *model) push(s string) {
+func (m *model) setView() {
 	follow := m.vp.AtBottom()
-	m.raw += s
-	m.vp.SetContent(lipgloss.NewStyle().Width(max(m.width, 8)).Render(m.raw))
+	content := m.baked
+	if m.cur != "" {
+		content += m.renderMD(m.cur)
+	}
+	m.vp.SetContent(lipgloss.NewStyle().Width(max(m.width, 8)).Render(content))
 	if follow {
 		m.vp.GotoBottom()
 	}
+}
+
+/* Appends pre-styled chrome, coalescing with a previous chrome span. */
+
+func (m *model) push(s string) {
+	if n := len(m.spans); n > 0 && !m.spans[n-1].md {
+		m.spans[n-1].text += s
+	} else {
+		m.spans = append(m.spans, span{text: s})
+	}
+	m.baked += s
+	m.setView()
+}
+
+/* Bakes the streamed answer into the transcript as a markdown span. */
+
+func (m *model) finalizeCur() {
+	if m.cur == "" {
+		return
+	}
+	m.spans = append(m.spans, span{md: true, text: m.cur})
+	m.baked += m.renderMD(m.cur)
+	m.cur = ""
+	m.setView()
+}
+
+/* Re-renders every span; called when the width changes. */
+
+func (m *model) rebake() {
+	m.baked = ""
+	for _, sp := range m.spans {
+		if sp.md {
+			m.baked += m.renderMD(sp.text)
+		} else {
+			m.baked += sp.text
+		}
+	}
+	m.setView()
 }
 
 /* Closes an open reasoning block so the answer starts on its own line. */
@@ -113,7 +199,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.vp.Width = msg.Width
 		m.vp.Height = max(msg.Height-5, 0) // padding, header, separators, input, padding
 		m.ti.Width = max(msg.Width-5, 8)
-		m.push("") // re-wrap the transcript for the new width
+		m.mdr = newRenderer(msg.Width)
+		m.rebake() // re-render the transcript for the new width
 
 	case tea.KeyMsg:
 		switch msg.Type {
@@ -156,24 +243,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.push(thinkStyle.Render(msg.text))
 		} else {
 			m.endThink()
-			m.push(msg.text)
+			m.cur += msg.text // raw markdown, rendered live by setView
+			m.setView()
 		}
 
 	case toolMsg:
 		m.endThink()
+		m.finalizeCur() // any answer text before the call bakes first
 		m.push("  [" + msg.name + "] → " + msg.out + "\n")
 
 	case doneMsg:
 		m.waiting = false
 		m.sh.cancel = nil
 		m.endThink()
+		m.finalizeCur()
 		switch {
 		case errors.Is(msg.err, agent.ErrStepLimit):
 			m.push(failStyle.Render("arx: step limit reached before a final answer") + "\n\n")
 		case msg.err != nil:
 			m.push(failStyle.Render("arx: "+msg.err.Error()) + "\n\n")
 		default:
-			m.push("\n\n") // close the streamed line, then a blank row between turns
+			m.push("\n") // rendered markdown ends its own line; add the blank row
 		}
 	}
 
@@ -207,6 +297,8 @@ func runTUI(ctrl *agent.Controller, prof llm.Profile) error {
 	m := model{
 		ctrl:   ctrl,
 		header: prof.Model + " · ctrl-c to leave",
+		spans:  []span{{text: "\n"}}, // breathing room above the first message
+		baked:  "\n",
 		vp:     viewport.New(80, 22),
 		ti:     ti,
 		sh:     &shared{},
@@ -220,8 +312,14 @@ func runTUI(ctrl *agent.Controller, prof llm.Profile) error {
 	}
 	// The alt screen vanishes on exit; leave the conversation behind
 	// in the real terminal, like the inline version did.
-	if fm, ok := final.(model); ok && fm.raw != "" {
-		fmt.Print(fm.raw)
+	if fm, ok := final.(model); ok {
+		out := fm.baked
+		if fm.cur != "" {
+			out += fm.renderMD(fm.cur)
+		}
+		if out != "" {
+			fmt.Print(out)
+		}
 	}
 	return nil
 }
