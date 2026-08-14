@@ -11,6 +11,10 @@ import (
 
 var orModelsURL = "https://openrouter.ai/api/v1/models"
 
+/*
+	Open Router Model structure + additional comments
+*/
+
 type orModel struct {
 	ID                  string   `json:"id"`
 	ContextLength       int      `json:"context_length"`
@@ -19,6 +23,10 @@ type orModel struct {
 		Modality string `json:"modality"`
 	} `json:"architecture"`
 }
+
+/*
+	Helper function that checks if a list contains a word
+*/
 
 func contains(list []string, want string) bool {
 	for _, s := range list {
@@ -32,6 +40,10 @@ func contains(list []string, want string) bool {
 type orList struct {
 	Data []orModel `json:"data"`
 }
+
+/*
+	Takes context as input, returns a map of Open Router Models.
+*/
 
 func fetchORCatalog(ctx context.Context) (map[string]orModel, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", orModelsURL, nil)
@@ -55,10 +67,6 @@ func fetchORCatalog(ctx context.Context) (map[string]orModel, error) {
 	for _, m := range list.Data {
 		id := m.ID
 		variant := false
-		// ":free"/":nitro" routing variants and dated snapshots share
-		// the base model's key but can differ in context length and
-		// tool support — the undated base entry's metadata must win
-		// regardless of response order.
 		if i := strings.IndexByte(id, ':'); i >= 0 {
 			id, variant = id[:i], true
 		}
@@ -72,10 +80,6 @@ func fetchORCatalog(ctx context.Context) (map[string]orModel, error) {
 		}
 	}
 	if len(index) == 0 {
-		// A 200 that yields nothing (an error envelope, a changed
-		// shape) is a failed authority, not an empty universe — report
-		// it so LoadModels surfaces the degradation instead of silently
-		// listing every model unenriched.
 		return nil, fmt.Errorf("openrouter catalog came back empty")
 	}
 	return index, nil
@@ -83,12 +87,6 @@ func fetchORCatalog(ctx context.Context) (map[string]orModel, error) {
 
 var datedSnapshot = regexp.MustCompile(`-\d{4}-\d{2}-\d{2}$`)
 
-// normalizeModelID reduces a model id to a joinable bare name: vendor
-// prefix off, dated snapshot off, lowercased. Colons are deliberately
-// NOT stripped here — OpenAI fine-tune ids ("ft:gpt-4o:org::abc")
-// contain them structurally, and collapsing those to "ft" merged every
-// fine-tune onto one key. OpenRouter's ":free" variant suffixes are
-// handled at index-build time in fetchORCatalog instead.
 func normalizeModelID(id string) string {
 	if _, bare, ok := strings.Cut(id, "/"); ok {
 		id = bare

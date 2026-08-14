@@ -9,16 +9,19 @@ import (
 	"net/http"
 )
 
-// llmClient carries no overall timeout: a completion near the token
-// cap legally runs for minutes. The caller's ctx is the deadline
-// authority; dial timeouts still apply via the default transport.
+/*
+	HTTP client that waits forever
+*/
+
 var llmClient = &http.Client{}
 
+/*
+	Data structures for chats, messages, tools and functions
+*/
+
 type Message struct {
-	Role string `json:"role"` // "system", "user", "assistant", "tool"
-	// Content is deliberately NOT omitempty: a tool result or an
-	// action-only assistant turn may carry "", and dropping the key
-	// produces messages the APIs reject on replay.
+	Role string `json:"role"`
+	// no omitempty: the APIs require the content key even when empty
 	Content    string     `json:"content"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
@@ -55,8 +58,11 @@ type chatRequest struct {
 	Stream              bool       `json:"stream,omitempty"`
 }
 
-// buildRequest fills the token cap under the spelling the provider
-// accepts; omitempty drops the unused one from the wire.
+/*
+	Takes the profile (model, provider, max tokens), message list, tools, stream
+	returns r (request) to a chatRequest with the correct arguments
+*/
+
 func buildRequest(prof Profile, msgs []Message, tools []ToolSpec, stream bool) chatRequest {
 	r := chatRequest{Model: prof.Model, Messages: msgs, Tools: tools, Stream: stream}
 	if prof.Provider.NewTokenParam {
@@ -67,9 +73,12 @@ func buildRequest(prof Profile, msgs []Message, tools []ToolSpec, stream bool) c
 	return r
 }
 
-// postChat sends one chat-completions request and hands back the open
-// 200 response; the caller owns resp.Body.Close. Non-200s are read,
-// closed, and returned as errors carrying the provider's explanation.
+/*
+	Takes context, profile, messages, tools, stream,
+	builds a json body, sends request to provider api
+	and returns an unread body.
+*/
+
 func postChat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec, stream bool) (*http.Response, error) {
 	body, err := json.Marshal(buildRequest(prof, msgs, tools, stream))
 	if err != nil {
@@ -81,7 +90,9 @@ func postChat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpe
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+prof.Provider.Key())
+	if k := prof.Provider.Key(); k != "" {
+		req.Header.Set("Authorization", "Bearer "+k)
+	}
 
 	resp, err := llmClient.Do(req)
 	if err != nil {
@@ -106,8 +117,11 @@ type chatResponse struct {
 	} `json:"usage"`
 }
 
-// Chat is the non-streaming completion call. Interactive turns use
-// Stream; this stays for headless work (tests, future subagents).
+/*
+	Takes the response by postChat
+	and returns the full message.
+*/
+
 func Chat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec) (Message, error) {
 	resp, err := postChat(ctx, prof, msgs, tools, false)
 	if err != nil {
@@ -126,34 +140,24 @@ func Chat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec) (
 	return m, completionErr(m, cr.Choices[0].FinishReason)
 }
 
-// completionErr is the completion contract shared by Chat and Stream:
-// a reply is only usable when it finished for a stated reason, its
-// tool calls are structurally whole, and it carries SOMETHING — an
-// unusable reply appended to the transcript is replayed on every later
-// request and bricks the session.
+/*
+	Rejects unusable replies: no finish reason, truncated or
+	hollow tool calls, empty output
+*/
+
 func completionErr(msg Message, finish string) error {
-	// A dropped connection surfaces as a clean EOF, so the only
-	// reliable completion signal is a non-empty finish_reason (same
-	// contract as arx-1): its absence is never a finished message.
 	if finish == "" {
 		return fmt.Errorf("response ended without a finish reason (connection lost mid-response?)")
 	}
 	if finish == "length" && len(msg.ToolCalls) > 0 {
-		// Truncated tool-call arguments are unparseable and would
-		// poison the transcript on replay.
 		return fmt.Errorf("hit the token limit mid tool-call; arguments are truncated")
 	}
 	for _, c := range msg.ToolCalls {
-		// A sparse or id-less delta sequence can assemble hollow calls;
-		// replaying an empty id (or omitting tool_call_id on the
-		// result) is rejected by the APIs.
 		if c.ID == "" || c.Function.Name == "" {
 			return fmt.Errorf("assembled tool call missing id or name (malformed stream)")
 		}
 	}
 	if msg.Content == "" && len(msg.ToolCalls) == 0 {
-		// Nothing usable arrived (e.g. the whole budget went to
-		// reasoning).
 		return fmt.Errorf("model produced no output (finish_reason %q)", finish)
 	}
 	return nil

@@ -6,19 +6,26 @@ import (
 	"strings"
 )
 
+/*
+	Dialect: Way to parse data from LLMs
+*/
+
 type Dialect string
 
 const (
 	OpenAI Dialect = "openai"
 )
 
+/*
+	Provider data structure and hardcoded list of providers and their information
+*/
+
 type Provider struct {
 	Name    string
 	BaseURL string
 	KeyEnv  string
 	Dialect Dialect
-	// NewTokenParam marks providers that want "max_completion_tokens"
-	// (OpenAI's reasoning-era name) instead of the classic "max_tokens".
+	// OpenAI's reasoning quirk: "max_completion_tokens"
 	NewTokenParam bool
 }
 
@@ -27,11 +34,19 @@ var Providers = map[string]Provider{
 	"openai":   {Name: "openai", BaseURL: "https://api.openai.com/v1", KeyEnv: "OPENAI_API_KEY", Dialect: OpenAI, NewTokenParam: true},
 }
 
+/*
+	Profile data structure, contains the provider, model and max tokens
+*/
+
 type Profile struct {
 	Provider  Provider
 	Model     string
 	MaxTokens int
 }
+
+/*
+	Parse takes a string like "deepseek/deepseek-v4-flash", and returns the provider, model, and added max tokens
+*/
 
 func Parse(spec string) (Profile, error) {
 	prov, model, ok := strings.Cut(spec, "/")
@@ -48,6 +63,10 @@ func Parse(spec string) (Profile, error) {
 	return Profile{Provider: p, Model: model, MaxTokens: 8192}, nil
 }
 
+/*
+	Checks that provider exists
+*/
+
 func GetProvider(name string) (Provider, error) {
 	p, ok := Providers[name]
 	if !ok {
@@ -55,6 +74,10 @@ func GetProvider(name string) (Provider, error) {
 	}
 	return p, nil
 }
+
+/*
+	Returns the key of input provider
+*/
 
 func (p Provider) Key() string {
 	if p.KeyEnv == "" {

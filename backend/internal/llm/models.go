@@ -12,11 +12,19 @@ import (
 	"time"
 )
 
-// httpClient is for bounded metadata calls (/models, the OpenRouter
-// catalog). Completions must NOT use it: 30s spans the entire body
-// read, which a long generation legitimately exceeds — they use
-// llmClient in client.go.
+/*
+	HTTP requester for this package, 30 timeout
+*/
+
 var httpClient = &http.Client{Timeout: 30 * time.Second}
+
+/*
+	Model:
+	- Lists the Id and OwnedBy
+
+	ModelInfo:
+	- Lists information about the Model, whether it reasons, has tools, etc
+*/
 
 type Model struct {
 	ID      string `json:"id"`
@@ -29,17 +37,19 @@ type ModelInfo struct {
 	Model         string
 	KeyEnv        string
 	ContextWindow int
-	Reasoning     bool // model has a reasoning mode (per OpenRouter)
-	Tools         bool // model can call tools — required for the agent loop
+	Reasoning     bool
+	Tools         bool
 }
 
 type modelList struct {
 	Data []Model `json:"data"`
 }
 
-// nonChatMarkers identify models that can't hold a chat conversation.
-// Fallback filter for ids OpenRouter's catalog doesn't know; naming
-// heuristics only, so it needs a new marker when a new modality ships.
+/*
+	Name markers that mean NOT a chat model; fallback filter for
+	models OpenRouter does not know
+*/
+
 var nonChatMarkers = []string{
 	"embedding", "tts", "whisper", "audio", "transcribe", "image", "sora",
 	"realtime", "moderation", "search-api", "babbage", "davinci", "instruct",
@@ -47,6 +57,7 @@ var nonChatMarkers = []string{
 }
 
 func chatCapable(id string) bool {
+	id = strings.ToLower(id)
 	for _, marker := range nonChatMarkers {
 		if strings.Contains(id, marker) {
 			return false
@@ -54,6 +65,11 @@ func chatCapable(id string) bool {
 	}
 	return true
 }
+
+/*
+	ListModels takes the context (cancellation context) and provider as input
+	and returns a list of discovered models for said provider
+*/
 
 func ListModels(ctx context.Context, p Provider) ([]Model, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", p.BaseURL+"/models", nil)
@@ -81,28 +97,26 @@ func ListModels(ctx context.Context, p Provider) ([]Model, error) {
 		return nil, fmt.Errorf("decode models: %w", err)
 	}
 	if list.Data == nil {
-		// Valid JSON with no "data" key is a changed or wrong response
-		// shape, not an empty catalog — silence here would misreport a
-		// working key as "no models found".
 		return nil, fmt.Errorf("%s /models: response carried no data field", p.Name)
 	}
 	return list.Data, nil
 }
 
+/*
+LoadModels returns every chat-capable model across providers with keys.
+Partial results: models and an error can both come back.
+*/
 func LoadModels(ctx context.Context) ([]ModelInfo, error) {
 	var out []ModelInfo
 	var errs []error
 
-	// OpenRouter's public catalog is the authority on which models are
-	// chat-capable. Models it doesn't know — because its slug namespace
-	// misses the id, or because the fetch failed — fall to the name
-	// heuristic below; a hollow authority degrades the filter, never
-	// blanks the catalog.
+	// Fetch Open Router Catalog
 	or, orErr := fetchORCatalog(ctx)
 	if orErr != nil {
 		errs = append(errs, fmt.Errorf("openrouter catalog: %w", orErr))
 	}
 
+	// Loop through all available providers
 	for name, p := range Providers {
 		if p.KeyEnv != "" && p.Key() == "" {
 			continue
@@ -112,6 +126,8 @@ func LoadModels(ctx context.Context) ([]ModelInfo, error) {
 			errs = append(errs, fmt.Errorf("%s: %w", name, err))
 			continue
 		}
+
+		// Loop the models of provider p
 		for _, m := range models {
 			info := ModelInfo{
 				Spec:     name + "/" + m.ID,
@@ -119,25 +135,20 @@ func LoadModels(ctx context.Context) ([]ModelInfo, error) {
 				Model:    m.ID,
 				KeyEnv:   p.KeyEnv,
 			}
-			// Two tiers of truth. Known to OpenRouter: its modality
-			// data decides, and the model gets enriched. Unknown (OR's
-			// slug namespace misses real ids like deepseek-reasoner and
-			// ft:… fine-tunes — or the whole fetch failed): the name
-			// heuristic decides. A join miss must never disappear a
-			// real chat model, but passing misses through unfiltered
-			// would readmit whisper, tts and friends. A nil map lookup
-			// is legal and always misses, so an absent catalog needs no
-			// special case.
+
+			// Check if m.ID (provider p model ID) is a text->text model.
 			om, known := or[normalizeModelID(m.ID)]
 			if known {
 				if !strings.HasSuffix(om.Architecture.Modality, "->text") {
-					continue // the authority says not a chat model
+					continue
 				}
 				info.ContextWindow = om.ContextLength
 				info.Reasoning = contains(om.SupportedParameters, "reasoning")
 				info.Tools = contains(om.SupportedParameters, "tools")
+
+				// Second check (fallback)
 			} else if !chatCapable(m.ID) {
-				continue // heuristic fallback: obviously non-chat by name
+				continue
 			}
 			out = append(out, info)
 		}

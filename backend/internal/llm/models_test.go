@@ -208,3 +208,15 @@ func TestListModelsRejectsMissingDataKey(t *testing.T) {
 		t.Fatalf("missing data key must error, got: %v", err)
 	}
 }
+
+// The heuristic must not care about casing in provider ids.
+func TestChatCapableIsCaseInsensitive(t *testing.T) {
+	for _, id := range []string{"DALL-E-3", "Whisper-1", "TTS-1-HD"} {
+		if chatCapable(id) {
+			t.Errorf("chatCapable(%q) = true, want false", id)
+		}
+	}
+	if !chatCapable("GPT-5.2") {
+		t.Error("chatCapable(GPT-5.2) = false, want true")
+	}
+}
