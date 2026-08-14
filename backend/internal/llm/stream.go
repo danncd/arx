@@ -120,12 +120,6 @@ func Stream(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec,
 	if err := sc.Err(); err != nil {
 		return msg, fmt.Errorf("stream read: %w", err)
 	}
-	for i := range msg.ToolCalls {
-		// Providers may omit arguments entirely for zero-arg tools;
-		// tools unmarshal their args, and "" is not valid JSON — {} is.
-		if msg.ToolCalls[i].Function.Arguments == "" {
-			msg.ToolCalls[i].Function.Arguments = "{}"
-		}
-	}
+	normalizeReply(&msg)
 	return msg, completionErr(msg, finish)
 }

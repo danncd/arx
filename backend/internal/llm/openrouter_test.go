@@ -71,12 +71,19 @@ func TestFetchORCatalog(t *testing.T) {
 // metadata must win no matter which the catalog lists first, because
 // variants routinely differ in context length and tool support.
 func TestFetchORCatalogBaseBeatsVariant(t *testing.T) {
+	// Both orders: variant before base AND base before variant — a
+	// last-write-wins index passes one but not both.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"data":[
 			{"id":"deepseek/deepseek-r1:free","context_length":32000,
 			 "architecture":{"modality":"text->text"}},
 			{"id":"deepseek/deepseek-r1","context_length":128000,
 			 "supported_parameters":["tools"],
+			 "architecture":{"modality":"text->text"}},
+			{"id":"vendor/basefirst","context_length":100000,
+			 "supported_parameters":["tools"],
+			 "architecture":{"modality":"text->text"}},
+			{"id":"vendor/basefirst:free","context_length":5000,
 			 "architecture":{"modality":"text->text"}},
 			{"id":"vendor/lonely:free","context_length":8000,
 			 "architecture":{"modality":"text->text"}}
@@ -95,6 +102,9 @@ func TestFetchORCatalogBaseBeatsVariant(t *testing.T) {
 	if om := index["deepseek-r1"]; om.ContextLength != 128000 || !contains(om.SupportedParameters, "tools") {
 		t.Fatalf("variant-first ordering clobbered the base entry: %+v", om)
 	}
+	if om := index["basefirst"]; om.ContextLength != 100000 || !contains(om.SupportedParameters, "tools") {
+		t.Fatalf("base-first ordering lost the base entry to its variant: %+v", om)
+	}
 	// A variant with no base entry still fills the key.
 	if om := index["lonely"]; om.ContextLength != 8000 {
 		t.Fatalf("variant-only model missing from index: %+v", om)
@@ -104,12 +114,18 @@ func TestFetchORCatalogBaseBeatsVariant(t *testing.T) {
 // Dated snapshots collapse onto the base id's key; the undated base
 // entry's metadata must win regardless of listing order.
 func TestFetchORCatalogDatedSnapshotNeverBeatsBase(t *testing.T) {
+	// Both orders again: snapshot-first and base-first.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"data":[
 			{"id":"openai/gpt-4o-2024-05-13","context_length":8000,
 			 "architecture":{"modality":"text->text"}},
 			{"id":"openai/gpt-4o","context_length":128000,
 			 "supported_parameters":["tools"],
+			 "architecture":{"modality":"text->text"}},
+			{"id":"openai/base-two","context_length":200000,
+			 "supported_parameters":["tools"],
+			 "architecture":{"modality":"text->text"}},
+			{"id":"openai/base-two-2024-01-01","context_length":4000,
 			 "architecture":{"modality":"text->text"}}
 		]}`))
 	}))
@@ -125,6 +141,9 @@ func TestFetchORCatalogDatedSnapshotNeverBeatsBase(t *testing.T) {
 	}
 	if om := index["gpt-4o"]; om.ContextLength != 128000 || !contains(om.SupportedParameters, "tools") {
 		t.Fatalf("dated snapshot clobbered the base entry: %+v", om)
+	}
+	if om := index["base-two"]; om.ContextLength != 200000 || !contains(om.SupportedParameters, "tools") {
+		t.Fatalf("base-first ordering lost the base to its snapshot: %+v", om)
 	}
 }
 

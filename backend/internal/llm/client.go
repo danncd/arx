@@ -137,7 +137,24 @@ func Chat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec) (
 		return Message{}, fmt.Errorf("%s chat: empty choices", prof.Provider.Name)
 	}
 	m := cr.Choices[0].Message
+	normalizeReply(&m)
 	return m, completionErr(m, cr.Choices[0].FinishReason)
+}
+
+/*
+	Enforces what both entry points promise: assistant role and
+	JSON-valid tool arguments, whatever the wire omitted
+*/
+
+func normalizeReply(m *Message) {
+	if m.Role == "" {
+		m.Role = "assistant"
+	}
+	for i := range m.ToolCalls {
+		if m.ToolCalls[i].Function.Arguments == "" {
+			m.ToolCalls[i].Function.Arguments = "{}"
+		}
+	}
 }
 
 /*

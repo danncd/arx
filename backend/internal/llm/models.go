@@ -136,19 +136,24 @@ func LoadModels(ctx context.Context) ([]ModelInfo, error) {
 				KeyEnv:   p.KeyEnv,
 			}
 
-			// Check if m.ID (provider p model ID) is a text->text model.
+			// The name veto applies to EVERY id: OpenRouter's modality
+			// says what tokens a model emits, not whether it is served
+			// by /chat/completions (gpt-3.5-turbo-instruct is
+			// text->text and still not a chat model).
+			if !chatCapable(m.ID) {
+				continue
+			}
+			// Known to OpenRouter with a modality: it decides, and the
+			// model gets enriched. An empty modality is schema drift,
+			// treated as unknown rather than as "not a chat model".
 			om, known := or[normalizeModelID(m.ID)]
-			if known {
+			if known && om.Architecture.Modality != "" {
 				if !strings.HasSuffix(om.Architecture.Modality, "->text") {
 					continue
 				}
 				info.ContextWindow = om.ContextLength
 				info.Reasoning = contains(om.SupportedParameters, "reasoning")
 				info.Tools = contains(om.SupportedParameters, "tools")
-
-				// Second check (fallback)
-			} else if !chatCapable(m.ID) {
-				continue
 			}
 			out = append(out, info)
 		}

@@ -91,14 +91,29 @@ func providerServing(t *testing.T, ids ...string) *httptest.Server {
 // provider-native ids (deepseek-reasoner, ft:… fine-tunes), and a join
 // miss must never disappear a working model.
 func TestLoadModelsAuthorityFilter(t *testing.T) {
-	prov := providerServing(t, "chat-model", "video-model", "unknown-model", "whisper-native")
+	// Fixture ids are chosen to pin each behavior separately: compound
+	// modalities match the real catalog (plain "text->text" fixtures
+	// once let a broken filter pass), R/T flags differ per model so a
+	// swapped assignment fails, a cased+dated id pins normalization,
+	// and a known "-instruct" id pins the name veto on join HITS.
+	prov := providerServing(t,
+		"chat-model", "tool-model", "video-model", "img-out-model",
+		"unknown-model", "whisper-native", "turbo-instruct",
+		"CHAT-MODEL-2025-01-01")
 	or := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"data":[
 			{"id":"fake/chat-model","context_length":128000,
-			 "supported_parameters":["reasoning","tools"],
+			 "supported_parameters":["reasoning"],
+			 "architecture":{"modality":"text+image->text"}},
+			{"id":"fake/tool-model","context_length":64000,
+			 "supported_parameters":["tools"],
 			 "architecture":{"modality":"text->text"}},
-			{"id":"fake/video-model","context_length":0,
-			 "architecture":{"modality":"text->video"}}
+			{"id":"fake/video-model",
+			 "architecture":{"modality":"text->video"}},
+			{"id":"fake/img-out-model",
+			 "architecture":{"modality":"text->text+image"}},
+			{"id":"fake/turbo-instruct","context_length":4095,
+			 "architecture":{"modality":"text->text"}}
 		]}`))
 	}))
 	t.Cleanup(or.Close)
@@ -108,28 +123,34 @@ func TestLoadModelsAuthorityFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadModels: %v", err)
 	}
-	if len(models) != 2 {
-		t.Fatalf("want chat-model (known, text) + unknown-model (join miss) to survive, got: %+v", models)
-	}
 	byName := map[string]ModelInfo{}
 	for _, m := range models {
 		byName[m.Model] = m
 	}
-	if _, dropped := byName["video-model"]; dropped {
-		t.Fatalf("authority-known non-text model must be dropped: %+v", models)
+	for _, dropped := range []string{"video-model", "img-out-model", "whisper-native", "turbo-instruct"} {
+		if _, kept := byName[dropped]; kept {
+			t.Fatalf("%s must be dropped: %+v", dropped, models)
+		}
 	}
-	// Tier two: a join miss whose NAME is obviously non-chat is still
-	// filtered by the heuristic.
-	if _, dropped := byName["whisper-native"]; dropped {
-		t.Fatalf("heuristic must drop non-chat join misses: %+v", models)
+	if len(models) != 4 {
+		t.Fatalf("want 4 survivors, got: %+v", models)
 	}
 	chat := byName["chat-model"]
-	if chat.ContextWindow != 128000 || !chat.Reasoning || !chat.Tools {
-		t.Fatalf("known model not enriched: %+v", chat)
+	if chat.ContextWindow != 128000 || !chat.Reasoning || chat.Tools {
+		t.Fatalf("chat-model: want ctx 128000, R and NOT T: %+v", chat)
+	}
+	tool := byName["tool-model"]
+	if tool.ContextWindow != 64000 || tool.Reasoning || !tool.Tools {
+		t.Fatalf("tool-model: want ctx 64000, T and NOT R: %+v", tool)
 	}
 	unknown := byName["unknown-model"]
 	if unknown.ContextWindow != 0 || unknown.Reasoning || unknown.Tools {
 		t.Fatalf("join miss must pass through UNenriched: %+v", unknown)
+	}
+	// A cased, dated provider id must still join its base OR entry.
+	dated := byName["CHAT-MODEL-2025-01-01"]
+	if dated.ContextWindow != 128000 || !dated.Reasoning {
+		t.Fatalf("normalization lost the dated/cased join: %+v", dated)
 	}
 }
 

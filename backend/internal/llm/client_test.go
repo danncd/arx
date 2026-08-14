@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,12 +13,29 @@ import (
 // Chat shares Stream's completion contract: truncated tool calls and
 // empty replies must not be returned as success.
 func TestChatGuards(t *testing.T) {
+	// The fake inspects the request: path, headers, and the absence of
+	// the stream flag — a request-blind fake once let all of those
+	// mutate freely with the suite green.
+	t.Setenv("FAKE_KEY", "sk-test")
 	serve := func(body string) Profile {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/chat/completions" {
+				t.Errorf("path = %q, want /chat/completions", r.URL.Path)
+			}
+			if got := r.Header.Get("Content-Type"); got != "application/json" {
+				t.Errorf("content-type = %q", got)
+			}
+			if got := r.Header.Get("Authorization"); got != "Bearer sk-test" {
+				t.Errorf("auth = %q, want Bearer sk-test", got)
+			}
+			reqBody, _ := io.ReadAll(r.Body)
+			if strings.Contains(string(reqBody), `"stream"`) {
+				t.Errorf("Chat must not request streaming: %s", reqBody)
+			}
 			w.Write([]byte(body))
 		}))
 		t.Cleanup(srv.Close)
-		return Profile{Provider: Provider{Name: "fake", BaseURL: srv.URL}, Model: "m", MaxTokens: 100}
+		return Profile{Provider: Provider{Name: "fake", BaseURL: srv.URL, KeyEnv: "FAKE_KEY"}, Model: "m", MaxTokens: 100}
 	}
 
 	// Happy path still works.
@@ -25,6 +43,17 @@ func TestChatGuards(t *testing.T) {
 	msg, err := Chat(context.Background(), prof, []Message{{Role: "user", Content: "x"}}, nil)
 	if err != nil || msg.Content != "hi" {
 		t.Fatalf("happy path: msg=%+v err=%v", msg, err)
+	}
+
+	// Wire omissions are normalized exactly as Stream does: missing
+	// role becomes assistant, missing arguments become {}.
+	prof = serve(`{"choices":[{"message":{"content":"","tool_calls":[{"id":"c1","type":"function","function":{"name":"current_time"}}]},"finish_reason":"tool_calls"}]}`)
+	msg, err = Chat(context.Background(), prof, nil, nil)
+	if err != nil {
+		t.Fatalf("zero-arg tool call: %v", err)
+	}
+	if msg.Role != "assistant" || msg.ToolCalls[0].Function.Arguments != "{}" {
+		t.Fatalf("reply not normalized: %+v", msg)
 	}
 
 	// Token limit mid tool-call: truncated arguments.
@@ -101,5 +130,34 @@ func TestMessageMarshalsToWireNames(t *testing.T) {
 	}
 	if !strings.Contains(string(b), `"tool_call_id":"abc"`) {
 		t.Fatalf("tool result missing tool_call_id: %s", b)
+	}
+}
+
+// The request and tool-spec wire tags, pinned the same way: a renamed
+// tag ships a key the API silently ignores.
+func TestRequestMarshalsToWireNames(t *testing.T) {
+	classic, _ := GetProvider("deepseek")
+	req := buildRequest(
+		Profile{Provider: classic, Model: "m", MaxTokens: 100},
+		[]Message{{Role: "user", Content: "hi"}},
+		[]ToolSpec{{Type: "function", Function: ToolFunction{
+			Name:        "current_time",
+			Description: "d",
+			Parameters:  json.RawMessage(`{"type":"object"}`),
+		}}},
+		false,
+	)
+	b, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"model":"m"`, `"messages":[`, `"tools":[`,
+		`"type":"function"`, `"function":{`, `"name":"current_time"`,
+		`"description":"d"`, `"parameters":{"type":"object"}`,
+	} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("request wire JSON missing %s: %s", want, b)
+		}
 	}
 }
