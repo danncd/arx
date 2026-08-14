@@ -1,26 +1,29 @@
 /*
-	Inline pinned layout: a fixed Arx header on row 1, the transcript
-	flowing top-down through a scroll region on rows 2..N-1 (normal
-	buffer, so it stays in the terminal after exit), and the input bar
-	on row N. The cursor is saved when leaving the transcript for the
-	bar and restored on the way back. Height changes are picked up at
-	prompt time, synchronously, so a redraw never races the stream.
+	Bubble Tea frontend: a fixed Arx header, the transcript in a
+	viewport that re-flows on resize, and the input bar pinned at the
+	bottom. The framework owns the screen buffer, which is exactly the
+	part hand-rolling could not do: resize repaints everything from
+	state. The dependency stays inside this package; the agent only
+	ever sees the Sink interface.
 */
 
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
-	"syscall"
-	"unsafe"
-)
 
-type tui struct {
-	rows, cols int
-	header     string
-}
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"arx/internal/agent"
+	"arx/internal/llm"
+)
 
 /* True when stdout is a real terminal, not a pipe or file. */
 
@@ -29,75 +32,166 @@ func isTerminal() bool {
 	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }
 
-/* Terminal size via ioctl; 24x80 when unknowable. */
+var (
+	headerStyle = lipgloss.NewStyle().Reverse(true)
+	userStyle   = lipgloss.NewStyle().Bold(true)
+	thinkStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	failStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+)
 
-func termSize() (rows, cols int) {
-	var ws struct{ rows, cols, x, y uint16 }
-	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL,
-		os.Stdout.Fd(), syscall.TIOCGWINSZ, uintptr(unsafe.Pointer(&ws)))
-	if errno != 0 || ws.rows < 4 || ws.cols < 8 {
-		return 24, 80
+/* Turn events, sent from the agent's goroutine into the update loop. */
+
+type tokenMsg struct {
+	text     string
+	thinking bool
+}
+type toolMsg struct{ name, out string }
+type doneMsg struct{ err error }
+
+/* teaSink forwards turn output to the program as messages. */
+
+type teaSink struct{ p *tea.Program }
+
+func (s teaSink) Token(text string, thinking bool) { s.p.Send(tokenMsg{text, thinking}) }
+func (s teaSink) ToolResult(name, out string)      { s.p.Send(toolMsg{name, out}) }
+
+/* shared carries the program handle; the model is copied by value. */
+
+type shared struct {
+	p      *tea.Program
+	cancel context.CancelFunc
+}
+
+type model struct {
+	ctrl    *agent.Controller
+	header  string
+	raw     string // the transcript with styles, re-wrapped on resize
+	waiting bool
+	width   int
+	vp      viewport.Model
+	ti      textinput.Model
+	sh      *shared
+}
+
+func (m model) Init() tea.Cmd { return textinput.Blink }
+
+func (m *model) push(s string) {
+	m.raw += s
+	m.vp.SetContent(lipgloss.NewStyle().Width(max(m.width, 8)).Render(m.raw))
+	m.vp.GotoBottom()
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.vp.Width = msg.Width
+		m.vp.Height = max(msg.Height-2, 1) // header row + input row
+		m.ti.Width = max(msg.Width-5, 8)
+		m.push("") // re-wrap the transcript for the new width
+
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyCtrlC, tea.KeyCtrlD:
+			if m.sh.cancel != nil {
+				m.sh.cancel()
+			}
+			return m, tea.Quit
+		case tea.KeyEnter:
+			text := strings.TrimSpace(m.ti.Value())
+			if text == "" || m.waiting {
+				return m, nil
+			}
+			m.ti.Reset()
+			m.waiting = true
+			m.push(userStyle.Render("› "+text) + "\n")
+			ctx, cancel := context.WithCancel(context.Background())
+			m.sh.cancel = cancel
+			ctrl, p := m.ctrl, m.sh.p
+			go func() {
+				err := ctrl.RunTurn(ctx, text, teaSink{p})
+				p.Send(doneMsg{err})
+			}()
+			return m, nil
+		}
+		var tiCmd, vpCmd tea.Cmd
+		m.ti, tiCmd = m.ti.Update(msg)
+		m.vp, vpCmd = m.vp.Update(msg) // pgup/pgdn scroll the transcript
+		return m, tea.Batch(tiCmd, vpCmd)
+
+	case tea.MouseMsg:
+		var cmd tea.Cmd
+		m.vp, cmd = m.vp.Update(msg) // wheel scrolls the transcript
+		return m, cmd
+
+	case tokenMsg:
+		if msg.thinking {
+			m.push(thinkStyle.Render(msg.text))
+		} else {
+			m.push(msg.text)
+		}
+
+	case toolMsg:
+		m.push("  [" + msg.name + "] → " + msg.out + "\n")
+
+	case doneMsg:
+		m.waiting = false
+		m.sh.cancel = nil
+		switch {
+		case errors.Is(msg.err, agent.ErrStepLimit):
+			m.push(failStyle.Render("arx: step limit reached before a final answer") + "\n")
+		case msg.err != nil:
+			m.push(failStyle.Render("arx: "+msg.err.Error()) + "\n")
+		default:
+			m.push("\n")
+		}
 	}
-	return int(ws.rows), int(ws.cols)
+
+	var cmd tea.Cmd
+	m.ti, cmd = m.ti.Update(msg)
+	return m, cmd
 }
 
-func openTUI(header string) *tui {
-	t := &tui{header: header}
-	t.rows, t.cols = termSize()
-	fmt.Print("\033[2J")
-	t.layout()
-	fmt.Print("\033[2;1H") // transcript grows from row 2
-	return t
+func (m model) View() string {
+	title := " Arx · " + m.header + " "
+	return headerStyle.Width(max(m.width, len(title))).Render(title) + "\n" +
+		m.vp.View() + "\n" +
+		m.ti.View()
 }
 
-/* Draws the fixed rows and sets the scroll region for the current size. */
+/* Runs the terminal UI; returns when the user leaves. */
 
-func (t *tui) layout() {
-	fmt.Print("\033[r") // release any previous region before redrawing fixed rows
-	title := " Arx · " + t.header
-	if len(title) > t.cols {
-		title = title[:t.cols]
+func runTUI(ctrl *agent.Controller, prof llm.Profile) error {
+	ti := textinput.New()
+	ti.Prompt = " > "
+	ti.Focus()
+
+	m := model{
+		ctrl:   ctrl,
+		header: prof.Provider.Name + "/" + prof.Model + " · ctrl-c to leave",
+		vp:     viewport.New(80, 22),
+		ti:     ti,
+		sh:     &shared{},
 	}
-	pad := strings.Repeat(" ", t.cols-len(title))
-	fmt.Printf("\033[1;1H\033[7m%s%s\033[0m", title, pad) // header bar, row 1
-	fmt.Printf("\033[2;%dr", t.rows-1)                    // rows 2..N-1 scroll
-}
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	m.sh.p = p
 
-/*
-	Re-reads the terminal size before a prompt. On change the emulator
-	has already reshuffled our rows into its own scrollback, and we
-	keep no copy of the transcript to re-flow, so the honest move is a
-	full reset: clear, redraw the fixed rows at the new geometry, and
-	let the transcript restart. Earlier chat stays readable in the
-	terminal's native scrollback.
-*/
-
-func (t *tui) refresh() {
-	rows, cols := termSize()
-	if rows == t.rows && cols == t.cols {
-		return
+	final, err := p.Run()
+	if err != nil {
+		return err
 	}
-	t.rows, t.cols = rows, cols
-	fmt.Print("\033[2J")
-	t.layout()
-	fmt.Print("\033[2;1H\033[90m(resized — earlier chat is in the scrollback above)\033[0m\n")
+	// The alt screen vanishes on exit; leave the conversation behind
+	// in the real terminal, like the inline version did.
+	if fm, ok := final.(model); ok && fm.raw != "" {
+		fmt.Print(fm.raw)
+	}
+	return nil
 }
 
-func (t *tui) close() {
-	fmt.Print("\033[r")
-	fmt.Printf("\033[%d;1H\033[2K", t.rows) // clear the bar; the shell takes over
-}
-
-/* Leaves the transcript for the bar: save the spot, draw the prompt. */
-
-func (t *tui) prompt() {
-	t.refresh()
-	fmt.Print("\0337")
-	fmt.Printf("\033[%d;1H\033[2K\033[7m > \033[0m ", t.rows)
-}
-
-/* Returns to the transcript where it left off. */
-
-func (t *tui) transcript() {
-	fmt.Print("\0338")
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
