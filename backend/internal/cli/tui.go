@@ -64,9 +64,12 @@ func (t *tui) layout() {
 }
 
 /*
-	Re-reads the terminal size before a prompt; on change, rebuilds the
-	fixed rows and drops the transcript cursor to the region's bottom
-	(the terminal reflowed the text anyway).
+	Re-reads the terminal size before a prompt. On change the emulator
+	has already reshuffled our rows into its own scrollback, and we
+	keep no copy of the transcript to re-flow, so the honest move is a
+	full reset: clear, redraw the fixed rows at the new geometry, and
+	let the transcript restart. Earlier chat stays readable in the
+	terminal's native scrollback.
 */
 
 func (t *tui) refresh() {
@@ -75,8 +78,9 @@ func (t *tui) refresh() {
 		return
 	}
 	t.rows, t.cols = rows, cols
+	fmt.Print("\033[2J")
 	t.layout()
-	fmt.Printf("\033[%d;1H", t.rows-1)
+	fmt.Print("\033[2;1H\033[90m(resized — earlier chat is in the scrollback above)\033[0m\n")
 }
 
 func (t *tui) close() {
