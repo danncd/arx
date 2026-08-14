@@ -5,6 +5,10 @@ import (
 	"strings"
 )
 
+// LoadDotEnv reads KEY=VALUE lines from path and exports each into the
+// process environment, unless the variable is already set — a real
+// exported variable always beats the file. A missing file is not an
+// error: running without one is normal (e.g. keys arriving via systemd).
 func LoadDotEnv(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {

@@ -42,7 +42,12 @@ func fetchORCatalog(ctx context.Context) (map[string]orModel, error) {
 	}
 	index := make(map[string]orModel, len(list.Data))
 	for _, m := range list.Data {
-		index[normalizeModelID(m.ID)] = m
+		key := normalizeModelID(m.ID)
+		// Base ids and dated/":free" variants can collide after
+		// normalization; first entry wins so the choice is deterministic.
+		if _, exists := index[key]; !exists {
+			index[key] = m
+		}
 	}
 	return index, nil
 }

@@ -33,7 +33,6 @@ type modelList struct {
 
 func ListModels(ctx context.Context, p Provider) ([]Model, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", p.BaseURL+"/models", nil)
-
 	if err != nil {
 		return nil, err
 	}
@@ -64,6 +63,10 @@ func LoadModels(ctx context.Context) ([]ModelInfo, error) {
 	var out []ModelInfo
 	var errs []error
 
+	// OpenRouter's public catalog is the authority on which models are
+	// chat-capable. When it is unreachable OR comes back empty, we skip
+	// filtering rather than intersect against a hollow authority and
+	// return an empty catalog (degrade open, report the error).
 	or, orErr := fetchORCatalog(ctx)
 	if orErr != nil {
 		errs = append(errs, fmt.Errorf("openrouter catalog: %w", orErr))
@@ -85,10 +88,10 @@ func LoadModels(ctx context.Context) ([]ModelInfo, error) {
 				Model:    m.ID,
 				KeyEnv:   p.KeyEnv,
 			}
-			if or != nil {
+			if len(or) > 0 {
 				om, ok := or[normalizeModelID(m.ID)]
 				if !ok || !strings.HasSuffix(om.Architecture.Modality, "->text") {
-					continue
+					continue // not a chat model per the authority: drop it
 				}
 				info.ContextWindow = om.ContextLength
 			}
