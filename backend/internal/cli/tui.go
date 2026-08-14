@@ -48,6 +48,9 @@ var (
 	// tool line: gray brackets around a light blue name
 	toolBracket = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	toolName    = lipgloss.NewStyle().Foreground(lipgloss.Color("#6fb7e6"))
+	// scrollbar: dim track, jade thumb
+	sbTrack = lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Render("│")
+	sbThumb = lipgloss.NewStyle().Foreground(lipgloss.Color("#2ea77a")).Render("┃")
 )
 
 /* Turn events, sent from the agent's goroutine into the update loop. */
@@ -180,7 +183,7 @@ func (m *model) setView() {
 	if m.cur != "" {
 		content += m.renderMD(m.cur)
 	}
-	m.vp.SetContent(lipgloss.NewStyle().Width(max(m.width, 8)).Render(content))
+	m.vp.SetContent(lipgloss.NewStyle().Width(max(m.vp.Width, 8)).Render(content))
 	if follow {
 		m.vp.GotoBottom()
 	}
@@ -260,10 +263,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
-		m.vp.Width = msg.Width
+		m.vp.Width = max(msg.Width-1, 1)   // the right column belongs to the scrollbar
 		m.vp.Height = max(msg.Height-5, 0) // padding, header, separators, input, padding
 		m.ti.Width = max(msg.Width-5, 8)
-		m.mdr = newRenderer(msg.Width)
+		m.mdr = newRenderer(m.vp.Width)
 		m.rebake() // re-render the transcript for the new width
 
 	case tea.KeyMsg:
@@ -348,15 +351,50 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+/*
+	A vertical scrollbar for the viewport: dim track, jade thumb sized
+	and placed from the scroll state. A blank column when everything
+	already fits, so the layout never shifts.
+*/
+
+func (m model) scrollbar() string {
+	h := m.vp.Height
+	total := m.vp.TotalLineCount()
+	var b strings.Builder
+	if h <= 0 || total <= h {
+		for i := 0; i < h; i++ {
+			if i > 0 {
+				b.WriteByte('\n')
+			}
+			b.WriteByte(' ')
+		}
+		return b.String()
+	}
+	thumb := max(h*h/total, 1)
+	pos := int(m.vp.ScrollPercent()*float64(h-thumb) + 0.5)
+	for i := 0; i < h; i++ {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		if i >= pos && i < pos+thumb {
+			b.WriteString(sbThumb)
+		} else {
+			b.WriteString(sbTrack)
+		}
+	}
+	return b.String()
+}
+
 func (m model) View() string {
 	brand := headerBrand.Render("〔 Arx 〕")
 	rest := headerDim.Render("· " + m.header + " ")
 	header := brand + rest
 	sep := sepStyle.Render(strings.Repeat("─", max(m.width, 8)))
+	body := lipgloss.JoinHorizontal(lipgloss.Top, m.vp.View(), m.scrollbar())
 	return "\n" +
 		header + "\n" +
 		sep + "\n" +
-		m.vp.View() + "\n" +
+		body + "\n" +
 		sep + "\n" +
 		m.ti.View() + "\n"
 }
