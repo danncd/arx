@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 	"unicode/utf8"
 
 	"arx/internal/llm"
@@ -15,7 +16,7 @@ var ErrStepLimit = errors.New("step limit reached before a final answer")
 
 type Sink interface {
 	Token(s string, thinking bool)
-	ToolResult(name, out string)
+	ToolResult(name, out string, took time.Duration)
 }
 
 type Controller struct {
@@ -71,13 +72,14 @@ func (c *Controller) RunTurn(ctx context.Context, text string, sink Sink) error 
 				c.skipTools(reply.ToolCalls[i:], err)
 				return err
 			}
+			start := time.Now()
 			out := runTool(ctx, tc)
 			if !utf8.ValidString(out) {
 				err := fmt.Errorf("tool %q returned invalid UTF-8", tc.Function.Name)
 				c.skipTools(reply.ToolCalls[i:], err)
 				return err
 			}
-			sink.ToolResult(tc.Function.Name, out)
+			sink.ToolResult(tc.Function.Name, out, time.Since(start))
 			c.msgs = append(c.msgs, llm.Message{
 				Role: "tool", ToolCallID: tc.ID, Content: out,
 			})

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"arx/internal/agent"
 	"arx/internal/config"
@@ -30,7 +31,7 @@ func (terminalSink) Token(s string, thinking bool) {
 	}
 }
 
-func (terminalSink) ToolResult(name, out string) {
+func (terminalSink) ToolResult(name, out string, _ time.Duration) {
 	fmt.Println("  [" + name + "] → " + out)
 }
 

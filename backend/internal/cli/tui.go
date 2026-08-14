@@ -41,10 +41,13 @@ var (
 			Foreground(lipgloss.Color("#34bf8c"))
 	headerDim  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	userMark   = lipgloss.NewStyle().Foreground(lipgloss.Color("#34bf8c"))
-	userStyle  = lipgloss.NewStyle()
+	userStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#34bf8c"))
 	thinkStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	failStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 	sepStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#2ea77a"))
+	// tool line: gray brackets around a warm coral name (jade's complement)
+	toolBracket = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	toolName    = lipgloss.NewStyle().Foreground(lipgloss.Color("#e0876b"))
 )
 
 /* Turn events, sent from the agent's goroutine into the update loop. */
@@ -53,7 +56,10 @@ type tokenMsg struct {
 	text     string
 	thinking bool
 }
-type toolMsg struct{ name, out string }
+type toolMsg struct {
+	name, out string
+	took      time.Duration
+}
 type doneMsg struct{ err error }
 
 /* teaSink forwards turn output to the program as messages. */
@@ -61,7 +67,9 @@ type doneMsg struct{ err error }
 type teaSink struct{ p *tea.Program }
 
 func (s teaSink) Token(text string, thinking bool) { s.p.Send(tokenMsg{text, thinking}) }
-func (s teaSink) ToolResult(name, out string)      { s.p.Send(toolMsg{name, out}) }
+func (s teaSink) ToolResult(name, out string, took time.Duration) {
+	s.p.Send(toolMsg{name, out, took})
+}
 
 /* shared carries the program handle; the model is copied by value. */
 
@@ -272,7 +280,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.ti.Reset()
 			m.waiting = true
-			m.push(userMark.Render("● » ") + userStyle.Render(text) + "\n\n")
+			m.push(userMark.Render("» ") + userStyle.Render(text) + "\n\n")
 			m.vp.GotoBottom() // sending always jumps to the latest
 			ctx, cancel := context.WithCancel(context.Background())
 			m.sh.cancel = cancel
@@ -317,7 +325,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case toolMsg:
 		m.endThink()
 		m.finalizeCur() // any answer text before the call bakes first
-		m.push("  [" + msg.name + "] → " + msg.out + "\n")
+		m.push(toolBracket.Render(" 〔 ") + toolName.Render(msg.name) +
+			toolBracket.Render(" 〕") + thinkDuration(msg.took) + "\n")
 
 	case doneMsg:
 		m.waiting = false

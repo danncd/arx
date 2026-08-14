@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"arx/internal/llm"
 	"arx/internal/tool"
@@ -21,16 +22,18 @@ type recSink struct {
 	tools  []string
 }
 
-func (r *recSink) Token(s string, _ bool)      { r.tokens = append(r.tokens, s) }
-func (r *recSink) ToolResult(name, out string) { r.tools = append(r.tools, name+"→"+out) }
+func (r *recSink) Token(s string, _ bool) { r.tokens = append(r.tokens, s) }
+func (r *recSink) ToolResult(name, out string, _ time.Duration) {
+	r.tools = append(r.tools, name+"→"+out)
+}
 
 type cancelSink struct {
 	recSink
 	cancel context.CancelFunc
 }
 
-func (s *cancelSink) ToolResult(name, out string) {
-	s.recSink.ToolResult(name, out)
+func (s *cancelSink) ToolResult(name, out string, _ time.Duration) {
+	s.recSink.ToolResult(name, out, 0)
 	if len(s.tools) == 1 {
 		s.cancel()
 	}
