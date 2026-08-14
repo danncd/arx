@@ -80,8 +80,16 @@ type shared struct {
 	at the new width.
 */
 
+type spanKind int
+
+const (
+	chromeSpan spanKind = iota // pre-styled, passes through verbatim
+	mdSpan                     // markdown, rendered by glamour
+	thinkSpan                  // raw reasoning, wrapped with the │ gutter
+)
+
 type span struct {
-	md   bool
+	kind spanKind
 	text string
 }
 
@@ -91,6 +99,7 @@ type model struct {
 	spans      []span
 	baked      string // rendered cache of spans
 	cur        string // the streaming answer, raw markdown
+	curThink   string // the streaming reasoning, raw
 	mdr        *glamour.TermRenderer
 	waiting    bool
 	inThink    bool // a reasoning block is open and needs closing
@@ -135,7 +144,21 @@ func (m *model) renderMD(s string) string {
 }
 
 /*
-	Sets the viewport from the baked transcript plus the live tail.
+	Wraps raw reasoning to the gutter width and prefixes every wrapped
+	line with │, so a long thought never escapes the rail.
+*/
+
+func (m *model) renderThink(s string) string {
+	wrapped := lipgloss.NewStyle().Width(max(m.width-4, 8)).Render(s)
+	lines := strings.Split(wrapped, "\n")
+	for i, ln := range lines {
+		lines[i] = thinkStyle.Render(" │ " + ln)
+	}
+	return strings.Join(lines, "\n")
+}
+
+/*
+	Sets the viewport from the baked transcript plus the live tails.
 	Follow-mode: the view sticks to the bottom only while it is already
 	there, so scrolling up during generation holds your place.
 */
@@ -143,6 +166,9 @@ func (m *model) renderMD(s string) string {
 func (m *model) setView() {
 	follow := m.vp.AtBottom()
 	content := m.baked
+	if m.curThink != "" {
+		content += m.renderThink(m.curThink) + "\n"
+	}
 	if m.cur != "" {
 		content += m.renderMD(m.cur)
 	}
@@ -155,7 +181,7 @@ func (m *model) setView() {
 /* Appends pre-styled chrome, coalescing with a previous chrome span. */
 
 func (m *model) push(s string) {
-	if n := len(m.spans); n > 0 && !m.spans[n-1].md {
+	if n := len(m.spans); n > 0 && m.spans[n-1].kind == chromeSpan {
 		m.spans[n-1].text += s
 	} else {
 		m.spans = append(m.spans, span{text: s})
@@ -170,7 +196,7 @@ func (m *model) finalizeCur() {
 	if m.cur == "" {
 		return
 	}
-	m.spans = append(m.spans, span{md: true, text: m.cur})
+	m.spans = append(m.spans, span{kind: mdSpan, text: m.cur})
 	m.baked += m.renderMD(m.cur)
 	m.cur = ""
 	m.setView()
@@ -181,9 +207,12 @@ func (m *model) finalizeCur() {
 func (m *model) rebake() {
 	m.baked = ""
 	for _, sp := range m.spans {
-		if sp.md {
+		switch sp.kind {
+		case mdSpan:
 			m.baked += m.renderMD(sp.text)
-		} else {
+		case thinkSpan:
+			m.baked += m.renderThink(sp.text)
+		default:
 			m.baked += sp.text
 		}
 	}
@@ -197,13 +226,20 @@ func (m *model) endThink() {
 		return
 	}
 	m.inThink = false
+	m.spans = append(m.spans, span{kind: thinkSpan, text: m.curThink})
+	m.baked += m.renderThink(m.curThink)
+	m.curThink = ""
 	m.push("\n\n") // close the block, then a blank row before what follows
 	if m.thinkIdx >= 0 && m.thinkIdx < len(m.spans) {
-		d := time.Since(m.thinkStart).Seconds()
-		m.spans[m.thinkIdx].text = thinkStyle.Render(fmt.Sprintf(" Thought for %.1f seconds", d)) + "\n"
+		secs := max(int(time.Since(m.thinkStart).Round(time.Second).Seconds()), 1)
+		unit := "seconds"
+		if secs == 1 {
+			unit = "second"
+		}
+		m.spans[m.thinkIdx].text = thinkStyle.Render(fmt.Sprintf(" Thought for %d %s", secs, unit)) + "\n"
 		m.thinkIdx = -1
-		m.rebake()
 	}
+	m.rebake()
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -254,20 +290,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tokenMsg:
 		if msg.thinking {
-			text := msg.text
 			if !m.inThink {
 				// Open the block: a label span of its own (so endThink
-				// can rewrite it) followed by the gutter.
+				// can rewrite it); the body accumulates raw in curThink
+				// and is wrapped live by renderThink.
 				m.inThink = true
 				m.thinkStart = time.Now()
 				label := thinkStyle.Render(" Thinking…") + "\n"
 				m.spans = append(m.spans, span{text: label})
 				m.thinkIdx = len(m.spans) - 1
 				m.baked += label
-				text = " │ " + text
 			}
-			text = strings.ReplaceAll(text, "\n", "\n │ ")
-			m.push(thinkStyle.Render(text))
+			m.curThink += msg.text
+			m.setView()
 		} else {
 			m.endThink()
 			m.cur += msg.text // raw markdown, rendered live by setView
