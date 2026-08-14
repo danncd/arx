@@ -21,6 +21,9 @@ type orModel struct {
 	Architecture        struct {
 		Modality string `json:"modality"`
 	} `json:"architecture"`
+	TopProvider struct {
+		MaxCompletionTokens int `json:"max_completion_tokens"`
+	} `json:"top_provider"`
 }
 
 /*

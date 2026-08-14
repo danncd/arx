@@ -38,6 +38,7 @@ type ModelInfo struct {
 	Model         string
 	KeyEnv        string
 	ContextWindow int
+	MaxOutput     int // provider's completion-token ceiling, 0 = unknown
 	Reasoning     bool
 	Tools         bool
 	ToolsKnown    bool
@@ -59,8 +60,16 @@ var nonChatMarkers = []string{
 }
 
 func providerChatCapable(p Provider, id string) bool {
-	if p.Name == "openai" && strings.Contains(normalizeModelID(id), "-codex") {
-		return false
+	if p.Name == "openai" {
+		bare := normalizeModelID(id)
+		// Modern families only: everything before gpt-5 is dead weight
+		// here, and it also sheds the Responses-only o1-pro era.
+		if !strings.HasPrefix(bare, "gpt-5") {
+			return false
+		}
+		if strings.Contains(bare, "-codex") {
+			return false
+		}
 	}
 	return chatCapable(id)
 }
@@ -170,6 +179,7 @@ func LoadModels(ctx context.Context) ([]ModelInfo, error) {
 					continue
 				}
 				info.ContextWindow = om.ContextLength
+				info.MaxOutput = om.TopProvider.MaxCompletionTokens
 				info.Reasoning = contains(om.SupportedParameters, "reasoning")
 				if om.SupportedParameters != nil {
 					info.Tools = contains(om.SupportedParameters, "tools")

@@ -103,7 +103,8 @@ func TestLoadModelsAuthorityFilter(t *testing.T) {
 			 "architecture":{"modality":"text+image->text"}},
 			{"id":"fake/tool-model","context_length":64000,
 			 "supported_parameters":["tools"],
-			 "architecture":{"modality":"text->text"}},
+			 "architecture":{"modality":"text->text"},
+			 "top_provider":{"max_completion_tokens":4096}},
 			{"id":"fake/video-model",
 			 "architecture":{"modality":"text->video"}},
 			{"id":"fake/img-out-model",
@@ -147,6 +148,9 @@ func TestLoadModelsAuthorityFilter(t *testing.T) {
 	tool := byName["tool-model"]
 	if tool.ContextWindow != 64000 || tool.Reasoning || !tool.Tools || !tool.ToolsKnown {
 		t.Fatalf("tool-model: want ctx 64000, T and NOT R: %+v", tool)
+	}
+	if tool.MaxOutput != 4096 {
+		t.Fatalf("completion ceiling not carried into the catalog: %+v", tool)
 	}
 	unknown := byName["unknown-model"]
 	if unknown.ContextWindow != 0 || unknown.Reasoning || unknown.Tools || unknown.ToolsKnown {
@@ -210,6 +214,34 @@ func TestLoadModelsSurvivesEmptyORCatalog(t *testing.T) {
 	}
 	if len(models) != 1 || models[0].Model != "chat-model" {
 		t.Fatalf("empty OR catalog must not blank the list, got: %+v", models)
+	}
+}
+
+/*
+	openai keeps only the gpt-5 family; other providers are untouched.
+*/
+
+func TestProviderChatCapableModernOpenAIOnly(t *testing.T) {
+	openai := Provider{Name: "openai"}
+	deepseek := Provider{Name: "deepseek"}
+	cases := []struct {
+		p    Provider
+		id   string
+		want bool
+	}{
+		{openai, "gpt-5.2", true},
+		{openai, "gpt-5-nano-2025-08-07", true},
+		{openai, "gpt-4o", false},
+		{openai, "gpt-3.5-turbo", false},
+		{openai, "o1-pro", false},
+		{openai, "chatgpt-4o-latest", false},
+		{openai, "gpt-5.3-codex", false},
+		{deepseek, "deepseek-v4-pro", true},
+	}
+	for _, c := range cases {
+		if got := providerChatCapable(c.p, c.id); got != c.want {
+			t.Errorf("providerChatCapable(%s, %s) = %v, want %v", c.p.Name, c.id, got, c.want)
+		}
 	}
 }
 

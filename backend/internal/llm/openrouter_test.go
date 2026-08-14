@@ -35,7 +35,8 @@ func TestFetchORCatalog(t *testing.T) {
 		w.Write([]byte(`{"data":[
 			{"id":"deepseek/deepseek-v4-flash","context_length":1000000,
 			 "supported_parameters":["reasoning","tools","temperature"],
-			 "architecture":{"modality":"text->text"}},
+			 "architecture":{"modality":"text->text"},
+			 "top_provider":{"max_completion_tokens":65536}},
 			{"id":"openai/sora-2","context_length":0,
 			 "architecture":{"modality":"text->video"}}
 		]}`))
@@ -56,6 +57,9 @@ func TestFetchORCatalog(t *testing.T) {
 	}
 	if om.ContextLength != 1000000 || om.Architecture.Modality != "text->text" {
 		t.Fatalf("wrong entry: %+v", om)
+	}
+	if om.TopProvider.MaxCompletionTokens != 65536 {
+		t.Fatalf("top_provider.max_completion_tokens not decoded: %+v", om)
 	}
 	if !contains(om.SupportedParameters, "reasoning") || !contains(om.SupportedParameters, "tools") {
 		t.Fatalf("supported_parameters not decoded: %+v", om.SupportedParameters)
