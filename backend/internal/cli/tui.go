@@ -155,11 +155,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sh.cancel = nil
 		switch {
 		case errors.Is(msg.err, agent.ErrStepLimit):
-			m.push(failStyle.Render("arx: step limit reached before a final answer") + "\n")
+			m.push(failStyle.Render("arx: step limit reached before a final answer") + "\n\n")
 		case msg.err != nil:
-			m.push(failStyle.Render("arx: "+msg.err.Error()) + "\n")
+			m.push(failStyle.Render("arx: "+msg.err.Error()) + "\n\n")
 		default:
-			m.push("\n")
+			m.push("\n\n") // close the streamed line, then a blank row between turns
 		}
 	}
 
