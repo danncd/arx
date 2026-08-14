@@ -58,10 +58,11 @@ func Run() error {
 	// read-run-print loop so scripting and tests stay possible.
 	var ui *tui
 	if isTerminal() {
-		ui = openTUI()
+		ui = openTUI(prof.Provider.Name + "/" + prof.Model + " · ctrl-d to leave")
 		defer ui.close()
+	} else {
+		fmt.Printf("arx — %s/%s · ctrl-d to leave\n", prof.Provider.Name, prof.Model)
 	}
-	fmt.Printf("arx — %s/%s · ctrl-d to leave\n", prof.Provider.Name, prof.Model)
 
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 0, 64*1024), 4*1024*1024) // large pastes stay valid input
