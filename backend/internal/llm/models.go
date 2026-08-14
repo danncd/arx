@@ -14,13 +14,9 @@ import (
 
 // httpClient is for bounded metadata calls (/models, the OpenRouter
 // catalog). Completions must NOT use it: 30s spans the entire body
-// read, which a long generation legitimately exceeds.
+// read, which a long generation legitimately exceeds — they use
+// llmClient in client.go.
 var httpClient = &http.Client{Timeout: 30 * time.Second}
-
-// llmClient carries no overall timeout: a healthy completion or stream
-// can legally run for minutes. The caller's ctx is the deadline
-// authority; dial timeouts still apply via the default transport.
-var llmClient = &http.Client{}
 
 type Model struct {
 	ID      string `json:"id"`
