@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/lipgloss"
 
 	"arx/internal/agent"
@@ -101,10 +102,14 @@ type model struct {
 func (m model) Init() tea.Cmd { return textinput.Blink }
 
 func newRenderer(width int) *glamour.TermRenderer {
-	// WithStandardStyle, not WithAutoStyle: auto probes the terminal
-	// through stdin and the probe races the keyboard, eating keystrokes.
+	// WithStandardStyle-derived config, not WithAutoStyle: auto probes
+	// the terminal through stdin and the probe races the keyboard,
+	// eating keystrokes.
+	cfg := styles.DarkStyleConfig
+	margin := uint(1)
+	cfg.Document.Margin = &margin
 	r, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle("dark"),
+		glamour.WithStyles(cfg),
 		glamour.WithWordWrap(max(width-2, 8)),
 	)
 	if err != nil {
@@ -187,7 +192,7 @@ func (m *model) rebake() {
 func (m *model) endThink() {
 	if m.inThink {
 		m.inThink = false
-		m.push("\n")
+		m.push("\n\n") // close the block, then a blank row before what follows
 	}
 }
 
@@ -239,8 +244,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tokenMsg:
 		if msg.thinking {
+			text := msg.text
+			if !m.inThink {
+				text = " " + text // indent the reasoning block
+			}
+			text = strings.ReplaceAll(text, "\n", "\n ")
 			m.inThink = true
-			m.push(thinkStyle.Render(msg.text))
+			m.push(thinkStyle.Render(text))
 		} else {
 			m.endThink()
 			m.cur += msg.text // raw markdown, rendered live by setView
