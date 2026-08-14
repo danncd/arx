@@ -37,7 +37,8 @@ var (
 	headerBrand = headerBase.Bold(true).
 			Foreground(lipgloss.Color("#34bf8c"))
 	headerDim  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	userStyle  = lipgloss.NewStyle().Bold(true)
+	userMark   = lipgloss.NewStyle().Foreground(lipgloss.Color("#34bf8c"))
+	userStyle  = lipgloss.NewStyle()
 	thinkStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	failStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 	sepStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#2ea77a"))
@@ -118,7 +119,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.ti.Reset()
 			m.waiting = true
-			m.push(userStyle.Render("› "+text) + "\n")
+			m.push(userMark.Render("● » ") + userStyle.Render(text) + "\n")
 			m.vp.GotoBottom() // sending always jumps to the latest
 			ctx, cancel := context.WithCancel(context.Background())
 			m.sh.cancel = cancel
@@ -168,7 +169,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	brand := headerBrand.Render(" Arx ")
+	brand := headerBrand.Render("〔 Arx 〕")
 	rest := headerDim.Render("· " + m.header + " ")
 	header := brand + rest
 	sep := sepStyle.Render(strings.Repeat("─", max(m.width, 8)))
@@ -184,7 +185,9 @@ func (m model) View() string {
 
 func runTUI(ctrl *agent.Controller, prof llm.Profile) error {
 	ti := textinput.New()
-	ti.Prompt = " > "
+	ti.Prompt = "» "
+	ti.PromptStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#34bf8c"))
+	ti.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#34bf8c"))
 	ti.Focus()
 
 	m := model{
