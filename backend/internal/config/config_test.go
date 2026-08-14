@@ -77,6 +77,32 @@ func TestLoadDotEnvDoesNotCorruptQuoteBearingValues(t *testing.T) {
 	}
 }
 
+// Values are LITERAL by contract: no escape processing, no inline
+// comment stripping. This pins the documented non-goals so a future
+// "improvement" is a conscious contract change, not drift.
+func TestLoadDotEnvValuesAreLiteral(t *testing.T) {
+	path := writeEnv(t, "ESCAPED=\"p\\\"q\"\nHASH=sk-abc#not-a-comment\nexport\tTABBED=works\n")
+	for _, k := range []string{"ESCAPED", "HASH", "TABBED"} {
+		unset(t, k)
+	}
+	if err := LoadDotEnv(path); err != nil {
+		t.Fatal(err)
+	}
+	// One balanced pair stripped; the backslash escape stays literal.
+	if got := os.Getenv("ESCAPED"); got != `p\"q` {
+		t.Errorf("escapes must stay literal: %q", got)
+	}
+	if got := os.Getenv("HASH"); got != "sk-abc#not-a-comment" {
+		t.Errorf("inline # must not be treated as a comment: %q", got)
+	}
+	if got := os.Getenv("TABBED"); got != "works" {
+		t.Errorf("export<TAB>KEY line not handled: %q", got)
+	}
+	if _, set := os.LookupEnv("export\tTABBED"); set {
+		t.Error("a garbage variable named with the export prefix was created")
+	}
+}
+
 func TestLoadDotEnvMissingFileIsFine(t *testing.T) {
 	if err := LoadDotEnv(filepath.Join(t.TempDir(), "nope.env")); err != nil {
 		t.Fatalf("missing file must be silent, got: %v", err)

@@ -40,9 +40,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Default model: deepseek when its key exists, else the first
+	// discovered model — a default whose provider has no key would 401
+	// on every turn right after printing a list of models that work.
 	spec := os.Getenv("ARX_MODEL")
 	if spec == "" {
 		spec = "deepseek/deepseek-v4-flash"
+		if p, perr := llm.GetProvider("deepseek"); perr != nil || p.Key() == "" {
+			spec = models[0].Spec // non-empty: guarded above
+		}
 	}
 	prof, err := llm.Parse(spec)
 	if err != nil {
@@ -66,7 +72,8 @@ func main() {
 		}
 		msgs = append(msgs, llm.Message{Role: "user", Content: text})
 
-		for step := 0; step < 8; step++ { // backstop, not a leash
+		done := false
+		for step := 0; step < 8 && !done; step++ { // backstop, not a leash
 			reply, err := llm.Stream(context.Background(), prof, msgs, tool.Specs(),
 				func(s string, thinking bool) {
 					if thinking {
@@ -77,13 +84,15 @@ func main() {
 				})
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "arx:", err)
-				break
+				done = true
+				continue
 			}
 			msgs = append(msgs, reply)
 
 			if len(reply.ToolCalls) == 0 {
 				fmt.Println()
-				break
+				done = true
+				continue
 			}
 			for _, tc := range reply.ToolCalls {
 				out := runTool(tc)
@@ -92,6 +101,11 @@ func main() {
 					Role: "tool", ToolCallID: tc.ID, Content: out,
 				})
 			}
+		}
+		if !done {
+			// The loop ran out of steps while the model was still
+			// calling tools; silence here looked exactly like success.
+			fmt.Fprintln(os.Stderr, "arx: step limit reached — turn ended without a final answer")
 		}
 	}
 	// Scan() returning false is EOF only when Err() is nil; a too-long

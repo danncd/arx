@@ -131,7 +131,10 @@ func Chat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec) (
 	if len(cr.Choices) == 0 {
 		return Message{}, fmt.Errorf("%s chat: empty choices", prof.Provider.Name)
 	}
-	return cr.Choices[0].Message, nil
+	// Same completion contract as Stream: a truncated or empty reply
+	// must not be reported as success.
+	m := cr.Choices[0].Message
+	return m, completionErr(m, cr.Choices[0].FinishReason)
 }
 
 // Stream is Chat with live output: content fragments stream to onToken
@@ -177,17 +180,31 @@ func Stream(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec,
 			continue // blank separators and ": keepalive" comments
 		}
 		payload = strings.TrimSpace(payload)
+		if payload == "" {
+			continue // "data:" with no payload is a legal SSE heartbeat
+		}
 		if payload == "[DONE]" {
 			break
 		}
 		var ch streamChunk
 		if err := json.Unmarshal([]byte(payload), &ch); err != nil {
+			// Some gateways send the error as a bare string rather than
+			// the usual object; surface the provider's words either way.
+			var alt struct {
+				Error string `json:"error"`
+			}
+			if json.Unmarshal([]byte(payload), &alt) == nil && alt.Error != "" {
+				msg.Content = content.String()
+				return msg, fmt.Errorf("%s stream error: %s", prof.Provider.Name, alt.Error)
+			}
 			// A data: payload that fails to parse is corruption, not
 			// noise: skipping it could drop text or argument fragments
 			// and then report the call as successful.
+			msg.Content = content.String()
 			return msg, fmt.Errorf("malformed stream data: %w", err)
 		}
 		if ch.Error != nil {
+			msg.Content = content.String()
 			return msg, fmt.Errorf("%s stream error: %s", prof.Provider.Name, ch.Error.Message)
 		}
 		if len(ch.Choices) == 0 {
@@ -207,6 +224,7 @@ func Stream(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec,
 		}
 		for _, tc := range d.ToolCalls {
 			if tc.Index < 0 || tc.Index > 63 {
+				msg.Content = content.String()
 				return msg, fmt.Errorf("malformed tool_call index %d in stream", tc.Index)
 			}
 			for tc.Index >= len(msg.ToolCalls) { // first fragment of a new call
@@ -222,27 +240,49 @@ func Stream(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec,
 			cur.Function.Arguments += tc.Function.Arguments // fragments concatenate
 		}
 	}
+	msg.Content = content.String()
 	if err := sc.Err(); err != nil {
 		return msg, fmt.Errorf("stream read: %w", err)
 	}
-	msg.Content = content.String()
+	for i := range msg.ToolCalls {
+		// Providers may omit arguments entirely for zero-arg tools;
+		// tools unmarshal their args, and "" is not valid JSON — {} is.
+		if msg.ToolCalls[i].Function.Arguments == "" {
+			msg.ToolCalls[i].Function.Arguments = "{}"
+		}
+	}
+	return msg, completionErr(msg, finish)
+}
 
-	// A dropped connection surfaces as a clean EOF, so the only reliable
-	// completion signal is a non-empty finish_reason (same contract as
-	// arx-1): its absence is an error, never a finished message.
+// completionErr is the completion contract shared by Chat and Stream:
+// a reply is only usable when it finished for a stated reason, its
+// tool calls are structurally whole, and it carries SOMETHING — an
+// unusable reply appended to the transcript is replayed on every later
+// request and bricks the session.
+func completionErr(msg Message, finish string) error {
+	// A dropped connection surfaces as a clean EOF, so the only
+	// reliable completion signal is a non-empty finish_reason (same
+	// contract as arx-1): its absence is never a finished message.
 	if finish == "" {
-		return msg, fmt.Errorf("stream ended without a finish reason (connection lost mid-response?)")
+		return fmt.Errorf("response ended without a finish reason (connection lost mid-response?)")
 	}
 	if finish == "length" && len(msg.ToolCalls) > 0 {
-		// Truncated tool-call arguments are unparseable and would poison
-		// the transcript on replay.
-		return msg, fmt.Errorf("hit the token limit mid tool-call; arguments are truncated")
+		// Truncated tool-call arguments are unparseable and would
+		// poison the transcript on replay.
+		return fmt.Errorf("hit the token limit mid tool-call; arguments are truncated")
+	}
+	for _, c := range msg.ToolCalls {
+		// A sparse or id-less delta sequence can assemble hollow calls;
+		// replaying an empty id (or omitting tool_call_id on the
+		// result) is rejected by the APIs.
+		if c.ID == "" || c.Function.Name == "" {
+			return fmt.Errorf("assembled tool call missing id or name (malformed stream)")
+		}
 	}
 	if msg.Content == "" && len(msg.ToolCalls) == 0 {
 		// Nothing usable arrived (e.g. the whole budget went to
-		// reasoning). Appending {"role":"assistant"} would be rejected
-		// on every later request, bricking the session.
-		return msg, fmt.Errorf("model produced no output (finish_reason %q)", finish)
+		// reasoning).
+		return fmt.Errorf("model produced no output (finish_reason %q)", finish)
 	}
-	return msg, nil
+	return nil
 }

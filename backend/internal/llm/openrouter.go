@@ -55,17 +55,28 @@ func fetchORCatalog(ctx context.Context) (map[string]orModel, error) {
 	for _, m := range list.Data {
 		id := m.ID
 		variant := false
-		// ":free"/":nitro" routing variants share the base model's key
-		// but can differ in context length and tool support — the base
-		// entry's metadata must win regardless of response order.
+		// ":free"/":nitro" routing variants and dated snapshots share
+		// the base model's key but can differ in context length and
+		// tool support — the undated base entry's metadata must win
+		// regardless of response order.
 		if i := strings.IndexByte(id, ':'); i >= 0 {
 			id, variant = id[:i], true
+		}
+		if datedSnapshot.MatchString(id) {
+			variant = true
 		}
 		key := normalizeModelID(id)
 		if _, exists := index[key]; !exists || (isVariant[key] && !variant) {
 			index[key] = m
 			isVariant[key] = variant
 		}
+	}
+	if len(index) == 0 {
+		// A 200 that yields nothing (an error envelope, a changed
+		// shape) is a failed authority, not an empty universe — report
+		// it so LoadModels surfaces the degradation instead of silently
+		// listing every model unenriched.
+		return nil, fmt.Errorf("openrouter catalog came back empty")
 	}
 	return index, nil
 }

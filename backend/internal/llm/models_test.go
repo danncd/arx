@@ -133,10 +133,13 @@ func TestLoadModelsAuthorityFilter(t *testing.T) {
 	}
 }
 
-// Degrade open: when OpenRouter is down, nothing is filtered and the
-// failure surfaces as an error alongside the full raw list.
+// Degrade open, tier two: when OpenRouter is down the failure is
+// reported and the NAME HEURISTIC still filters — obvious non-chat ids
+// are dropped, everything else survives. (An earlier version of this
+// test claimed "unfiltered" with fixtures that matched no marker, so
+// it passed no matter what the code did.)
 func TestLoadModelsDegradesOpenWhenORDown(t *testing.T) {
-	prov := providerServing(t, "chat-model", "video-model")
+	prov := providerServing(t, "chat-model", "video-model", "whisper-x")
 	or := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -148,12 +151,21 @@ func TestLoadModelsDegradesOpenWhenORDown(t *testing.T) {
 		t.Fatal("an unreachable authority must be reported")
 	}
 	if len(models) != 2 {
-		t.Fatalf("OR down must pass models through unfiltered, got: %+v", models)
+		t.Fatalf("want chat-model and video-model to survive the heuristic, got: %+v", models)
+	}
+	for _, m := range models {
+		if m.Model == "whisper-x" {
+			t.Fatalf("heuristic must still filter with OR down: %+v", models)
+		}
+		if m.ContextWindow != 0 {
+			t.Fatalf("nothing should be enriched with OR down: %+v", m)
+		}
 	}
 }
 
-// An EMPTY-but-successful OpenRouter answer must also degrade open —
-// intersecting with a hollow authority would blank the whole catalog.
+// An empty-but-200 OpenRouter answer is a failed authority (an error
+// envelope, a changed shape), not an empty universe: the failure is
+// REPORTED, and models still survive via the heuristic.
 func TestLoadModelsSurvivesEmptyORCatalog(t *testing.T) {
 	prov := providerServing(t, "chat-model")
 	or := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -163,10 +175,10 @@ func TestLoadModelsSurvivesEmptyORCatalog(t *testing.T) {
 	withFakeWorld(t, prov.URL, or.URL)
 
 	models, err := LoadModels(context.Background())
-	if err != nil {
-		t.Fatalf("empty catalog is not an error: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("a hollow authority must be reported, got: %v", err)
 	}
-	if len(models) != 1 {
+	if len(models) != 1 || models[0].Model != "chat-model" {
 		t.Fatalf("empty OR catalog must not blank the list, got: %+v", models)
 	}
 }
@@ -180,5 +192,19 @@ func TestListModelsRejectsGarbage(t *testing.T) {
 	_, err := ListModels(context.Background(), Provider{Name: "fake", BaseURL: srv.URL})
 	if err == nil {
 		t.Fatal("non-JSON body must error, not return empty models")
+	}
+}
+
+// Valid JSON with no "data" key is a changed response shape, not an
+// empty catalog — silence would misreport a working key as keyless.
+func TestListModelsRejectsMissingDataKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"object":"list","models":[{"id":"a"}]}`))
+	}))
+	defer srv.Close()
+
+	_, err := ListModels(context.Background(), Provider{Name: "fake", BaseURL: srv.URL})
+	if err == nil || !strings.Contains(err.Error(), "no data field") {
+		t.Fatalf("missing data key must error, got: %v", err)
 	}
 }

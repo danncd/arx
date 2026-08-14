@@ -47,6 +47,7 @@ type modelList struct {
 var nonChatMarkers = []string{
 	"embedding", "tts", "whisper", "audio", "transcribe", "image", "sora",
 	"realtime", "moderation", "search-api", "babbage", "davinci", "instruct",
+	"dall-e", "codex-mini", "computer-use",
 }
 
 func chatCapable(id string) bool {
@@ -83,6 +84,12 @@ func ListModels(ctx context.Context, p Provider) ([]Model, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
 		return nil, fmt.Errorf("decode models: %w", err)
 	}
+	if list.Data == nil {
+		// Valid JSON with no "data" key is a changed or wrong response
+		// shape, not an empty catalog — silence here would misreport a
+		// working key as "no models found".
+		return nil, fmt.Errorf("%s /models: response carried no data field", p.Name)
+	}
 	return list.Data, nil
 }
 
@@ -91,9 +98,10 @@ func LoadModels(ctx context.Context) ([]ModelInfo, error) {
 	var errs []error
 
 	// OpenRouter's public catalog is the authority on which models are
-	// chat-capable. When it is unreachable OR comes back empty, we skip
-	// filtering rather than intersect against a hollow authority and
-	// return an empty catalog (degrade open, report the error).
+	// chat-capable. Models it doesn't know — because its slug namespace
+	// misses the id, or because the fetch failed — fall to the name
+	// heuristic below; a hollow authority degrades the filter, never
+	// blanks the catalog.
 	or, orErr := fetchORCatalog(ctx)
 	if orErr != nil {
 		errs = append(errs, fmt.Errorf("openrouter catalog: %w", orErr))
@@ -115,17 +123,16 @@ func LoadModels(ctx context.Context) ([]ModelInfo, error) {
 				Model:    m.ID,
 				KeyEnv:   p.KeyEnv,
 			}
-			// Three tiers of truth. Known to OpenRouter: its modality
+			// Two tiers of truth. Known to OpenRouter: its modality
 			// data decides, and the model gets enriched. Unknown (OR's
-			// slug namespace misses real ids: deepseek-reasoner, ft:…
-			// fine-tunes) or OR unreachable: the name heuristic decides
-			// — a join miss must never disappear a real chat model, but
-			// passing misses through unfiltered would readmit whisper,
-			// tts and friends.
-			om, known := orModel{}, false
-			if len(or) > 0 {
-				om, known = or[normalizeModelID(m.ID)]
-			}
+			// slug namespace misses real ids like deepseek-reasoner and
+			// ft:… fine-tunes — or the whole fetch failed): the name
+			// heuristic decides. A join miss must never disappear a
+			// real chat model, but passing misses through unfiltered
+			// would readmit whisper, tts and friends. A nil map lookup
+			// is legal and always misses, so an absent catalog needs no
+			// special case.
+			om, known := or[normalizeModelID(m.ID)]
 			if known {
 				if !strings.HasSuffix(om.Architecture.Modality, "->text") {
 					continue // the authority says not a chat model

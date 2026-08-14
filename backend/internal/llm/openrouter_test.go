@@ -101,6 +101,50 @@ func TestFetchORCatalogBaseBeatsVariant(t *testing.T) {
 	}
 }
 
+// Dated snapshots collapse onto the base id's key; the undated base
+// entry's metadata must win regardless of listing order.
+func TestFetchORCatalogDatedSnapshotNeverBeatsBase(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"data":[
+			{"id":"openai/gpt-4o-2024-05-13","context_length":8000,
+			 "architecture":{"modality":"text->text"}},
+			{"id":"openai/gpt-4o","context_length":128000,
+			 "supported_parameters":["tools"],
+			 "architecture":{"modality":"text->text"}}
+		]}`))
+	}))
+	defer srv.Close()
+
+	old := orModelsURL
+	orModelsURL = srv.URL
+	defer func() { orModelsURL = old }()
+
+	index, err := fetchORCatalog(context.Background())
+	if err != nil {
+		t.Fatalf("fetchORCatalog: %v", err)
+	}
+	if om := index["gpt-4o"]; om.ContextLength != 128000 || !contains(om.SupportedParameters, "tools") {
+		t.Fatalf("dated snapshot clobbered the base entry: %+v", om)
+	}
+}
+
+// A 200 that yields no entries (an error envelope, a changed shape) is
+// a failed authority and must be reported, not silently degrade.
+func TestFetchORCatalogEmptyIsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"error":{"code":429,"message":"rate limited"}}`))
+	}))
+	defer srv.Close()
+
+	old := orModelsURL
+	orModelsURL = srv.URL
+	defer func() { orModelsURL = old }()
+
+	if _, err := fetchORCatalog(context.Background()); err == nil {
+		t.Fatal("empty catalog must be reported as an error")
+	}
+}
+
 func TestFetchORCatalogErrors(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

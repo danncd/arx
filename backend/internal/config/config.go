@@ -25,7 +25,11 @@ func LoadDotEnv(path string) error {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		line = strings.TrimPrefix(line, "export ")
+		// Shell-sourceable files write "export KEY=v" (space or tab).
+		if rest, ok := strings.CutPrefix(line, "export"); ok &&
+			len(rest) > 0 && (rest[0] == ' ' || rest[0] == '\t') {
+			line = strings.TrimSpace(rest)
+		}
 		k, v, ok := strings.Cut(line, "=")
 		if !ok {
 			continue
@@ -34,6 +38,9 @@ func LoadDotEnv(path string) error {
 		v = strings.TrimSpace(v)
 		// Strip exactly one BALANCED pair of quotes. A cutset Trim here
 		// ate unmatched trailing quote characters out of real secrets.
+		// Beyond that, values are LITERAL: no escape processing (\" and
+		// \n stay as typed) and no inline # comments (secrets may
+		// contain #). Full dotenv semantics are a non-goal.
 		if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
 			v = v[1 : len(v)-1]
 		}
