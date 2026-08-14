@@ -75,10 +75,19 @@ type model struct {
 
 func (m model) Init() tea.Cmd { return textinput.Blink }
 
+/*
+	Appends to the transcript. Follow-mode: the view sticks to the tail
+	only while it is already there, so scrolling up during generation
+	holds your place; returning to the bottom re-engages the follow.
+*/
+
 func (m *model) push(s string) {
+	follow := m.vp.AtBottom()
 	m.raw += s
 	m.vp.SetContent(lipgloss.NewStyle().Width(max(m.width, 8)).Render(m.raw))
-	m.vp.GotoBottom()
+	if follow {
+		m.vp.GotoBottom()
+	}
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -106,6 +115,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ti.Reset()
 			m.waiting = true
 			m.push(userStyle.Render("› "+text) + "\n")
+			m.vp.GotoBottom() // sending always jumps to the latest
 			ctx, cancel := context.WithCancel(context.Background())
 			m.sh.cancel = cancel
 			ctrl, p := m.ctrl, m.sh.p
