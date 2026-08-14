@@ -33,11 +33,15 @@ func isTerminal() bool {
 }
 
 var (
-	headerStyle = lipgloss.NewStyle().Reverse(true)
-	userStyle   = lipgloss.NewStyle().Bold(true)
-	thinkStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	failStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
-	sepStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	headerBase = lipgloss.NewStyle().
+			Background(lipgloss.Color("#2ea77a")). // Arx jade
+			Foreground(lipgloss.Color("#121212"))
+	headerBrand = headerBase.Bold(true).
+			Foreground(lipgloss.Color("#f0f0f0"))
+	userStyle  = lipgloss.NewStyle().Bold(true)
+	thinkStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	failStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	sepStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#2ea77a"))
 )
 
 /* Turn events, sent from the agent's goroutine into the update loop. */
@@ -97,7 +101,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.vp.Width = msg.Width
-		m.vp.Height = max(msg.Height-6, 1) // padding, header, separators, input, padding
+		m.vp.Height = max(msg.Height-5, 0) // padding, header, separators, input, padding
 		m.ti.Width = max(msg.Width-5, 8)
 		m.push("") // re-wrap the transcript for the new width
 
@@ -165,10 +169,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	title := " Arx · " + m.header + " "
+	brand := headerBrand.Render(" Arx ")
+	rest := headerBase.Render("· " + m.header + " ")
+	pad := max(m.width-lipgloss.Width(brand+rest), 0)
+	header := brand + rest + headerBase.Render(strings.Repeat(" ", pad))
 	sep := sepStyle.Render(strings.Repeat("─", max(m.width, 8)))
 	return "\n" +
-		headerStyle.Width(max(m.width, len(title))).Render(title) + "\n" +
+		header + "\n" +
 		sep + "\n" +
 		m.vp.View() + "\n" +
 		sep + "\n" +
