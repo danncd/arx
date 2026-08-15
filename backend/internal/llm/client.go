@@ -11,21 +11,20 @@ import (
 	"unicode/utf8"
 )
 
-/*
-	HTTP client that waits forever
-*/
+/* Chat requests follow the caller's deadline. */
 
 var llmClient = &http.Client{}
 
-/*
-	Data structures for chats, messages, tools and functions
-*/
+const maxChatBytes int64 = 8 << 20
+
+/* Chat wire types. */
 
 type Message struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Role             string     `json:"role"`
+	Content          string     `json:"content"`
+	ReasoningContent string     `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string     `json:"tool_call_id,omitempty"`
 }
 
 type ToolCall struct {
@@ -59,10 +58,7 @@ type chatRequest struct {
 	Stream              bool       `json:"stream,omitempty"`
 }
 
-/*
-	Takes the profile (model, provider, max tokens), message list, tools, stream
-	returns r (request) to a chatRequest with the correct arguments
-*/
+/* Builds the provider's request shape. */
 
 func buildRequest(prof Profile, msgs []Message, tools []ToolSpec, stream bool) chatRequest {
 	r := chatRequest{Model: prof.Model, Messages: msgs, Tools: tools, Stream: stream}
@@ -74,11 +70,7 @@ func buildRequest(prof Profile, msgs []Message, tools []ToolSpec, stream bool) c
 	return r
 }
 
-/*
-	Takes context, profile, messages, tools, stream,
-	builds a json body, sends request to provider api
-	and returns an unread body.
-*/
+/* Sends a chat request and leaves a successful body open. */
 
 func postChat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec, stream bool) (*http.Response, error) {
 	body, err := json.Marshal(buildRequest(prof, msgs, tools, stream))
@@ -118,16 +110,9 @@ type chatResponse struct {
 		Message      Message `json:"message"`
 		FinishReason string  `json:"finish_reason"`
 	} `json:"choices"`
-	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-	} `json:"usage"`
 }
 
-/*
-	Takes the response by postChat
-	and returns the full message.
-*/
+/* Runs one non-streaming chat request. */
 
 func Chat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec) (Message, error) {
 	resp, err := postChat(ctx, prof, msgs, tools, false)
@@ -136,9 +121,13 @@ func Chat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec) (
 	}
 	defer resp.Body.Close()
 
-	raw, err := io.ReadAll(resp.Body)
+	limited := &io.LimitedReader{R: resp.Body, N: maxChatBytes + 1}
+	raw, err := io.ReadAll(limited)
 	if err != nil {
 		return Message{}, fmt.Errorf("read chat response: %w", err)
+	}
+	if limited.N == 0 {
+		return Message{}, fmt.Errorf("chat response exceeded %d bytes", maxChatBytes)
 	}
 	if !utf8.Valid(raw) {
 		return Message{}, fmt.Errorf("decode chat response: invalid UTF-8")
@@ -164,10 +153,7 @@ func Chat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec) (
 	return m, completionErr(m, cr.Choices[0].FinishReason)
 }
 
-/*
-	Enforces what both entry points promise: assistant role and
-	JSON-valid tool arguments, whatever the wire omitted
-*/
+/* Fills reply fields providers may omit. */
 
 func normalizeReply(m *Message) {
 	if m.Role == "" {
@@ -183,10 +169,7 @@ func normalizeReply(m *Message) {
 	}
 }
 
-/*
-	Rejects unusable replies: no finish reason, truncated or
-	hollow tool calls, empty output
-*/
+/* Rejects incomplete replies. */
 
 func completionErr(msg Message, finish string) error {
 	if finish == "" {

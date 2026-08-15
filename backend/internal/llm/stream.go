@@ -13,9 +13,7 @@ import (
 
 const maxStreamBytes int64 = 4 << 20
 
-/*
-	Stream chunk data structure
-*/
+/* Streaming response fields. */
 
 type streamChunk struct {
 	Error *struct {
@@ -62,12 +60,10 @@ func splitSSELines(data []byte, atEOF bool) (advance int, token []byte, err erro
 	return 0, nil, nil
 }
 
-/*
-	Sends a request to postChat with stream=true
-*/
+/* Streams one chat response. */
 
 func Stream(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec, onToken func(s string, thinking bool)) (Message, error) {
-	// postChat call and error handling
+	// Open the stream.
 	resp, err := postChat(ctx, prof, msgs, tools, true)
 	if err != nil {
 		return Message{}, err
@@ -76,15 +72,17 @@ func Stream(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec,
 	mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	isSSE := mediaType == "text/event-stream"
 
-	// Build assisstant reply skeleton
+	// Assemble the reply.
 	msg := Message{}
 	var content strings.Builder
+	var reasoning strings.Builder
 	var arguments [][]string
 	finish := ""
 	finished := false
 	done := false
 	assemble := func() {
 		msg.Content = content.String()
+		msg.ReasoningContent = reasoning.String()
 		for i := range msg.ToolCalls {
 			msg.ToolCalls[i].Function.Arguments = strings.Join(arguments[i], "")
 		}
@@ -94,10 +92,10 @@ func Stream(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec,
 		return msg, err
 	}
 
-	// Start a scanner that reads the response from postChat
+	// Read SSE lines.
 	limited := &io.LimitedReader{R: resp.Body, N: maxStreamBytes + 1}
 	sc := bufio.NewScanner(limited)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	sc.Buffer(make([]byte, 0, 64*1024), int(maxStreamBytes)+1)
 	sc.Split(splitSSELines)
 
 	var eventData strings.Builder
@@ -135,12 +133,16 @@ func Stream(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec,
 
 		d := ch.Choices[0].Delta
 		if d.Role != "" {
+			if d.Role != "assistant" {
+				return fmt.Errorf("reply has role %q, want assistant", d.Role)
+			}
 			if msg.Role != "" && msg.Role != d.Role {
 				return fmt.Errorf("stream changed reply role from %q to %q", msg.Role, d.Role)
 			}
 			msg.Role = d.Role
 		}
 		if d.ReasoningContent != "" {
+			reasoning.WriteString(d.ReasoningContent)
 			onToken(d.ReasoningContent, true)
 		}
 		if d.Content != "" {

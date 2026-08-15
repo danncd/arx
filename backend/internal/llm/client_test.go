@@ -10,9 +10,7 @@ import (
 	"testing"
 )
 
-/*
-	Chat rejects unusable replies.
-*/
+/* Rejects unusable chat replies. */
 
 func TestChatGuards(t *testing.T) {
 	// Check the request too.
@@ -39,9 +37,9 @@ func TestChatGuards(t *testing.T) {
 	}
 
 	// Basic reply.
-	prof := serve(`{"choices":[{"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`)
+	prof := serve(`{"choices":[{"message":{"role":"assistant","content":"hi","reasoning_content":"thought"},"finish_reason":"stop"}]}`)
 	msg, err := Chat(context.Background(), prof, []Message{{Role: "user", Content: "x"}}, nil)
-	if err != nil || msg.Content != "hi" {
+	if err != nil || msg.Content != "hi" || msg.ReasoningContent != "thought" {
 		t.Fatalf("happy path: msg=%+v err=%v", msg, err)
 	}
 
@@ -131,9 +129,7 @@ func TestChatGuards(t *testing.T) {
 	}
 }
 
-/*
-	Returns the status and provider error.
-*/
+/* Keeps the HTTP status and provider error. */
 
 func TestChatSurfacesHTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -149,9 +145,20 @@ func TestChatSurfacesHTTPError(t *testing.T) {
 	}
 }
 
-/*
-	Uses each provider's token field.
-*/
+func TestChatLimitsResponseSize(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(strings.Repeat("x", int(maxChatBytes)+1)))
+	}))
+	t.Cleanup(srv.Close)
+	prof := Profile{Provider: Provider{Name: "fake", BaseURL: srv.URL}, Model: "m"}
+
+	_, err := Chat(context.Background(), prof, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "exceeded") {
+		t.Fatalf("oversized response error = %v", err)
+	}
+}
+
+/* Uses each provider's token field. */
 
 func TestBuildRequestTokenParam(t *testing.T) {
 	msgs := []Message{{Role: "user", Content: "hi"}}
@@ -182,13 +189,12 @@ func TestBuildRequestTokenParam(t *testing.T) {
 	}
 }
 
-/*
-	Keeps message field names stable.
-*/
+/* Keeps message field names stable. */
 
 func TestMessageMarshalsToWireNames(t *testing.T) {
 	m := Message{
-		Role: "assistant",
+		Role:             "assistant",
+		ReasoningContent: "thought",
 		ToolCalls: []ToolCall{{
 			ID: "abc", Type: "function",
 			Function: FunctionCall{Name: "current_time", Arguments: "{}"},
@@ -198,7 +204,7 @@ func TestMessageMarshalsToWireNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"tool_calls"`, `"id":"abc"`, `"function"`, `"name":"current_time"`, `"arguments"`, `"content":""`} {
+	for _, want := range []string{`"reasoning_content":"thought"`, `"tool_calls"`, `"id":"abc"`, `"function"`, `"name":"current_time"`, `"arguments"`, `"content":""`} {
 		if !strings.Contains(string(b), want) {
 			t.Fatalf("wire JSON missing %s: %s", want, b)
 		}
@@ -214,9 +220,7 @@ func TestMessageMarshalsToWireNames(t *testing.T) {
 	}
 }
 
-/*
-	Keeps request field names stable.
-*/
+/* Keeps request field names stable. */
 
 func TestRequestMarshalsToWireNames(t *testing.T) {
 	classic, _ := GetProvider("deepseek")

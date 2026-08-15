@@ -50,9 +50,7 @@ func TestListModelsSurfacesHTTPError(t *testing.T) {
 	}
 }
 
-/*
-	Swaps provider and OpenRouter for tests.
-*/
+/* Swaps provider discovery for one test. */
 
 func withFakeWorld(t *testing.T, providerURL, orURL string) {
 	t.Helper()
@@ -86,9 +84,7 @@ func providerServing(t *testing.T, ids ...string) *httptest.Server {
 	return srv
 }
 
-/*
-	Known models use modality; unknown models pass through.
-*/
+/* Uses catalog authority when available. */
 
 func TestLoadModelsAuthorityFilter(t *testing.T) {
 	// Cover metadata, normalization and name filters.
@@ -167,9 +163,7 @@ func TestLoadModelsAuthorityFilter(t *testing.T) {
 	}
 }
 
-/*
-	OpenRouter failure keeps heuristic results.
-*/
+/* Keeps heuristic results when OpenRouter fails. */
 
 func TestLoadModelsDegradesOpenWhenORDown(t *testing.T) {
 	prov := providerServing(t, "chat-model", "video-model", "whisper-x")
@@ -196,9 +190,7 @@ func TestLoadModelsDegradesOpenWhenORDown(t *testing.T) {
 	}
 }
 
-/*
-	Empty OpenRouter data reports an error without hiding models.
-*/
+/* Keeps provider models when OpenRouter is empty. */
 
 func TestLoadModelsSurvivesEmptyORCatalog(t *testing.T) {
 	prov := providerServing(t, "chat-model")
@@ -217,9 +209,7 @@ func TestLoadModelsSurvivesEmptyORCatalog(t *testing.T) {
 	}
 }
 
-/*
-	openai keeps only the gpt-5 family; other providers are untouched.
-*/
+/* Keeps current OpenAI chat models. */
 
 func TestProviderChatCapableModernOpenAIOnly(t *testing.T) {
 	openai := Provider{Name: "openai"}
@@ -257,9 +247,7 @@ func TestListModelsRejectsGarbage(t *testing.T) {
 	}
 }
 
-/*
-	Missing data is a bad response.
-*/
+/* Rejects a missing data field. */
 
 func TestListModelsRejectsMissingDataKey(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -312,6 +300,42 @@ func TestListModelsRejectsTrailingJSON(t *testing.T) {
 	}
 }
 
+func TestDecodeJSONLimitsCatalogSize(t *testing.T) {
+	body := `{"data":[]}` + strings.Repeat(" ", int(maxCatalogBytes)+1)
+	var list modelList
+	err := decodeJSON(strings.NewReader(body), &list)
+	if err == nil || !strings.Contains(err.Error(), "exceeded") {
+		t.Fatalf("oversized catalog error = %v", err)
+	}
+}
+
+func TestDecodeJSONRejectsInvalidUTF8(t *testing.T) {
+	var list modelList
+	err := decodeJSON(strings.NewReader("{\"data\":[{\"id\":\""+string([]byte{0xff})+"\"}]}"), &list)
+	if err == nil || !strings.Contains(err.Error(), "invalid UTF-8") {
+		t.Fatalf("invalid UTF-8 error = %v", err)
+	}
+}
+
+func TestLoadModelsSkipsCatalogWithoutProviders(t *testing.T) {
+	oldProviders := Providers
+	oldOR := orModelsURL
+	Providers = map[string]Provider{
+		"fake": {Name: "fake", BaseURL: "http://unused.invalid", KeyEnv: "ARX_TEST_UNSET_KEY"},
+	}
+	orModelsURL = "http://unused.invalid"
+	t.Cleanup(func() {
+		Providers = oldProviders
+		orModelsURL = oldOR
+	})
+	t.Setenv("ARX_TEST_UNSET_KEY", "")
+
+	models, err := LoadModels(context.Background())
+	if err != nil || len(models) != 0 {
+		t.Fatalf("keyless discovery = %+v, %v", models, err)
+	}
+}
+
 func TestLoadModelsRejectsNativeNonChatIDs(t *testing.T) {
 	prov := providerServing(t,
 		"gpt-5-codex", "gpt-5.1-codex", "gpt-5.1-codex-max",
@@ -340,9 +364,7 @@ func TestLoadModelsRejectsNativeNonChatIDs(t *testing.T) {
 	}
 }
 
-/*
-	Providers without keys are skipped.
-*/
+/* Skips providers without keys. */
 
 func TestLoadModelsSkipsKeylessProviders(t *testing.T) {
 	prov := providerServing(t, "chat-model")
@@ -368,9 +390,7 @@ func TestLoadModelsSkipsKeylessProviders(t *testing.T) {
 	}
 }
 
-/*
-	Model filters ignore case.
-*/
+/* Model filters ignore case. */
 
 func TestChatCapableIsCaseInsensitive(t *testing.T) {
 	for _, id := range []string{"DALL-E-3", "Whisper-1", "TTS-1-HD"} {

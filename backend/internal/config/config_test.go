@@ -3,12 +3,11 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-/*
-	Removes a variable and restores it after the test.
-*/
+/* Clears a variable for one test. */
 
 func unset(t *testing.T, key string) {
 	t.Helper()
@@ -78,9 +77,7 @@ func TestLoadDotEnvDoesNotCorruptQuoteBearingValues(t *testing.T) {
 	}
 }
 
-/*
-	Keeps dotenv values literal.
-*/
+/* Keeps dotenv values literal. */
 
 func TestLoadDotEnvValuesAreLiteral(t *testing.T) {
 	path := writeEnv(t, "ESCAPED=\"p\\\"q\"\nHASH=sk-abc#not-a-comment\nexport\tTABBED=works\n")
@@ -119,5 +116,12 @@ func TestLoadDotEnvStripsBOM(t *testing.T) {
 	}
 	if got := os.Getenv("BOM_KEY"); got != "value" {
 		t.Errorf("BOM not stripped, key mangled: %q", got)
+	}
+}
+
+func TestLoadDotEnvReturnsSetError(t *testing.T) {
+	path := writeEnv(t, "BAD\x00KEY=value\n")
+	if err := LoadDotEnv(path); err == nil || !strings.Contains(err.Error(), "BAD") {
+		t.Fatalf("invalid environment key error = %v", err)
 	}
 }

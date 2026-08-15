@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,21 +12,16 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
-/*
-	HTTP requester for this package, 30 timeout
-*/
+/* Discovery requests stop after 30 seconds. */
 
 var httpClient = &http.Client{Timeout: 30 * time.Second}
 
-/*
-	Model:
-	- Lists the Id and OwnedBy
+const maxCatalogBytes int64 = 8 << 20
 
-	ModelInfo:
-	- Lists information about the Model, whether it reasons, has tools, etc
-*/
+/* Provider models and their discovered capabilities. */
 
 type Model struct {
 	ID      string `json:"id"`
@@ -48,10 +44,7 @@ type modelList struct {
 	Data []Model `json:"data"`
 }
 
-/*
-	Name markers that mean NOT a chat model; fallback filter for
-	models OpenRouter does not know
-*/
+/* Fallback markers for models missing from OpenRouter. */
 
 var nonChatMarkers = []string{
 	"embedding", "tts", "whisper", "audio", "transcribe", "image", "sora",
@@ -62,8 +55,7 @@ var nonChatMarkers = []string{
 func providerChatCapable(p Provider, id string) bool {
 	if p.Name == "openai" {
 		bare := normalizeModelID(id)
-		// Modern families only: everything before gpt-5 is dead weight
-		// here, and it also sheds the Responses-only o1-pro era.
+		// Keep current Chat Completions families.
 		if !strings.HasPrefix(bare, "gpt-5") {
 			return false
 		}
@@ -84,10 +76,7 @@ func chatCapable(id string) bool {
 	return true
 }
 
-/*
-	ListModels takes the context (cancellation context) and provider as input
-	and returns a list of discovered models for said provider
-*/
+/* Lists one provider's models. */
 
 func ListModels(ctx context.Context, p Provider) ([]Model, error) {
 	endpoint, err := url.JoinPath(p.BaseURL, "models")
@@ -134,33 +123,36 @@ func ListModels(ctx context.Context, p Provider) ([]Model, error) {
 	return models, nil
 }
 
-/*
-	LoadModels returns every chat-capable model across providers with keys.
-	Partial results: models and an error can both come back.
-*/
+/* Finds chat models for every configured provider. */
 
 func LoadModels(ctx context.Context) ([]ModelInfo, error) {
 	var out []ModelInfo
 	var errs []error
+	var names []string
+	for name, p := range Providers {
+		if p.KeyEnv == "" || p.Key() != "" {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return nil, nil
+	}
+	sort.Strings(names)
 
-	// Fetch Open Router Catalog
+	// OpenRouter supplies cross-provider capabilities.
 	or, orErr := fetchORCatalog(ctx)
 	if orErr != nil {
 		errs = append(errs, fmt.Errorf("openrouter catalog: %w", orErr))
 	}
 
-	// Loop through all available providers
-	for name, p := range Providers {
-		if p.KeyEnv != "" && p.Key() == "" {
-			continue
-		}
+	for _, name := range names {
+		p := Providers[name]
 		models, err := ListModels(ctx, p)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", name, err))
 			continue
 		}
 
-		// Loop the models of provider p
 		for _, m := range models {
 			info := ModelInfo{
 				Spec:     name + "/" + m.ID,
@@ -194,12 +186,23 @@ func LoadModels(ctx context.Context) ([]ModelInfo, error) {
 }
 
 func decodeJSON(r io.Reader, v any) error {
-	dec := json.NewDecoder(r)
+	raw, err := io.ReadAll(io.LimitReader(r, maxCatalogBytes+1))
+	if err != nil {
+		return err
+	}
+	if int64(len(raw)) > maxCatalogBytes {
+		return fmt.Errorf("response exceeded %d bytes", maxCatalogBytes)
+	}
+	if !utf8.Valid(raw) {
+		return fmt.Errorf("response contains invalid UTF-8")
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
 	if err := dec.Decode(v); err != nil {
 		return err
 	}
 	var extra json.RawMessage
-	if err := dec.Decode(&extra); err != io.EOF {
+	err = dec.Decode(&extra)
+	if err != io.EOF {
 		if err == nil {
 			return fmt.Errorf("multiple JSON values")
 		}

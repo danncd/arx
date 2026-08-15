@@ -10,9 +10,7 @@ import (
 
 var orModelsURL = "https://openrouter.ai/api/v1/models"
 
-/*
-	Open Router Model structure + additional comments
-*/
+/* OpenRouter fields used during discovery. */
 
 type orModel struct {
 	ID                  string   `json:"id"`
@@ -25,10 +23,6 @@ type orModel struct {
 		MaxCompletionTokens int `json:"max_completion_tokens"`
 	} `json:"top_provider"`
 }
-
-/*
-	Helper function that checks if a list contains a word
-*/
 
 func contains(list []string, want string) bool {
 	for _, s := range list {
@@ -43,9 +37,7 @@ type orList struct {
 	Data []orModel `json:"data"`
 }
 
-/*
-	Takes context as input, returns a map of Open Router Models.
-*/
+/* Loads OpenRouter metadata by normalized model ID. */
 
 func fetchORCatalog(ctx context.Context) (map[string]orModel, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", orModelsURL, nil)

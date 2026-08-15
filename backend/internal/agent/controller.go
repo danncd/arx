@@ -16,7 +16,7 @@ var ErrStepLimit = errors.New("step limit reached before a final answer")
 
 type Sink interface {
 	Token(s string, thinking bool)
-	ToolResult(name, out string, took time.Duration)
+	ToolResult(name, out string, took time.Duration, failed bool)
 }
 
 type Controller struct {
@@ -57,9 +57,11 @@ func (c *Controller) RunTurn(ctx context.Context, text string, sink Sink) error 
 		}
 		reply, err := llm.Stream(ctx, c.prof, c.msgs, specs, sink.Token)
 		if err != nil {
+			c.keepPartial(reply)
 			return err
 		}
 		if !toolsEnabled && len(reply.ToolCalls) > 0 {
+			c.keepPartial(reply)
 			return fmt.Errorf("model returned tool calls while tools are disabled")
 		}
 		c.msgs = append(c.msgs, reply)
@@ -73,13 +75,13 @@ func (c *Controller) RunTurn(ctx context.Context, text string, sink Sink) error 
 				return err
 			}
 			start := time.Now()
-			out := runTool(ctx, tc)
+			out, failed := runTool(ctx, tc)
 			if !utf8.ValidString(out) {
 				err := fmt.Errorf("tool %q returned invalid UTF-8", tc.Function.Name)
 				c.skipTools(reply.ToolCalls[i:], err)
 				return err
 			}
-			sink.ToolResult(tc.Function.Name, out, time.Since(start))
+			sink.ToolResult(tc.Function.Name, out, time.Since(start), failed)
 			c.msgs = append(c.msgs, llm.Message{
 				Role: "tool", ToolCallID: tc.ID, Content: out,
 			})
@@ -92,6 +94,23 @@ func (c *Controller) RunTurn(ctx context.Context, text string, sink Sink) error 
 	return ErrStepLimit
 }
 
+func (c *Controller) keepPartial(reply llm.Message) {
+	if reply.Role != "" && reply.Role != "assistant" {
+		return
+	}
+	if reply.Content == "" {
+		return
+	}
+	if !utf8.ValidString(reply.Content) || !utf8.ValidString(reply.ReasoningContent) {
+		return
+	}
+	c.msgs = append(c.msgs, llm.Message{
+		Role:             "assistant",
+		Content:          reply.Content,
+		ReasoningContent: reply.ReasoningContent,
+	})
+}
+
 func (c *Controller) skipTools(calls []llm.ToolCall, cause error) {
 	for _, tc := range calls {
 		c.msgs = append(c.msgs, llm.Message{
@@ -100,17 +119,17 @@ func (c *Controller) skipTools(calls []llm.ToolCall, cause error) {
 	}
 }
 
-func runTool(ctx context.Context, tc llm.ToolCall) string {
+func runTool(ctx context.Context, tc llm.ToolCall) (string, bool) {
 	t, ok := tool.Get(tc.Function.Name)
 	if !ok {
-		return "error: unknown tool " + tc.Function.Name
+		return "error: unknown tool " + tc.Function.Name, true
 	}
 	out, err := t.Run(ctx, json.RawMessage(tc.Function.Arguments))
 	if err != nil {
-		return "error: " + err.Error()
+		return "error: " + err.Error(), true
 	}
 	if out == "" {
-		return "(no output)"
+		return "(no output)", false
 	}
-	return out
+	return out, false
 }

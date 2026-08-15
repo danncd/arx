@@ -69,9 +69,7 @@ func TestFetchORCatalog(t *testing.T) {
 	}
 }
 
-/*
-	The base model beats routing variants.
-*/
+/* Prefers base models over routing variants. */
 
 func TestFetchORCatalogBaseBeatsVariant(t *testing.T) {
 	// Cover both list orders.
@@ -113,9 +111,7 @@ func TestFetchORCatalogBaseBeatsVariant(t *testing.T) {
 	}
 }
 
-/*
-	The base model beats dated snapshots.
-*/
+/* Prefers base models over dated snapshots. */
 
 func TestFetchORCatalogDatedSnapshotNeverBeatsBase(t *testing.T) {
 	// Cover both list orders.
@@ -151,9 +147,7 @@ func TestFetchORCatalogDatedSnapshotNeverBeatsBase(t *testing.T) {
 	}
 }
 
-/*
-	Empty catalogs are errors.
-*/
+/* Rejects an empty catalog. */
 
 func TestFetchORCatalogEmptyIsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

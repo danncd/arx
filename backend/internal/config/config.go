@@ -1,14 +1,12 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strings"
 )
 
-/*
-	LoadDotEnv loads literal dotenv values and keeps existing variables.
-	Missing files are fine.
-*/
+/* Loads literal dotenv values without replacing the environment. */
 
 func LoadDotEnv(path string) error {
 	data, err := os.ReadFile(path)
@@ -43,7 +41,9 @@ func LoadDotEnv(path string) error {
 			continue
 		}
 		if _, exists := os.LookupEnv(k); !exists {
-			os.Setenv(k, v)
+			if err := os.Setenv(k, v); err != nil {
+				return fmt.Errorf("set %q from %s: %w", k, path, err)
+			}
 		}
 	}
 	return nil

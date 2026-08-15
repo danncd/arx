@@ -8,8 +8,7 @@ import (
 	"testing"
 )
 
-// streamFrom serves body as the SSE response and runs Stream against
-// it, collecting emitted tokens.
+/* Runs Stream against a test SSE body. */
 func streamFrom(t *testing.T, body string) (Message, []string, error) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -25,7 +24,11 @@ func streamFrom(t *testing.T, body string) (Message, []string, error) {
 }
 
 func TestStreamAssemblesContentAndToolCalls(t *testing.T) {
-	msg, tokens, err := streamFrom(t, `data: {"choices":[{"delta":{"role":"assistant","content":"Hel"}}]}
+	msg, tokens, err := streamFrom(t, `data: {"choices":[{"delta":{"role":"assistant","reasoning_content":"think "}}]}
+
+data: {"choices":[{"delta":{"reasoning_content":"first"}}]}
+
+data: {"choices":[{"delta":{"content":"Hel"}}]}
 
 data:{"choices":[{"delta":{"content":"lo"}}]}
 
@@ -40,12 +43,14 @@ data: [DONE]
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	// The second delta used the spec-legal spaceless "data:" form and
-	// must not be dropped.
+	// Keep the legal spaceless data line.
 	if msg.Content != "Hello" {
 		t.Fatalf("content = %q, want Hello", msg.Content)
 	}
-	if len(tokens) != 2 {
+	if msg.ReasoningContent != "think first" {
+		t.Fatalf("reasoning = %q, want think first", msg.ReasoningContent)
+	}
+	if len(tokens) != 4 {
 		t.Fatalf("tokens = %v", tokens)
 	}
 	if len(msg.ToolCalls) != 1 || msg.ToolCalls[0].ID != "c1" ||
@@ -65,8 +70,7 @@ data: {"error":{"message":"rate limit exceeded"}}
 }
 
 func TestStreamRequiresFinishReason(t *testing.T) {
-	// A cut connection is a clean EOF; without a finish_reason the
-	// message must not be reported as complete.
+	// Clean EOF without a finish reason is still incomplete.
 	_, _, err := streamFrom(t, `data: {"choices":[{"delta":{"content":"Hel"}}]}
 `)
 	if err == nil || !strings.Contains(err.Error(), "finish reason") {
@@ -92,10 +96,8 @@ data: [DONE]
 }
 
 func TestStreamRejectsEmptyOutput(t *testing.T) {
-	// Reasoning-only stream: the whole budget went to thinking. The
-	// returned message would marshal to {"role":"assistant"} and brick
-	// the session on replay — must be an error, not a success.
-	_, tokens, err := streamFrom(t, `data: {"choices":[{"delta":{"reasoning_content":"hmm"}}]}
+	// A reasoning-only reply cannot be replayed as an answer.
+	msg, tokens, err := streamFrom(t, `data: {"choices":[{"delta":{"reasoning_content":"hmm"}}]}
 
 data: {"choices":[{"delta":{},"finish_reason":"length"}]}
 
@@ -107,6 +109,9 @@ data: [DONE]
 	if len(tokens) != 1 || tokens[0] != "hmm" {
 		t.Fatalf("reasoning should still have streamed: %v", tokens)
 	}
+	if msg.ReasoningContent != "hmm" {
+		t.Fatalf("reasoning was not preserved: %+v", msg)
+	}
 }
 
 func TestStreamRejectsMalformedIndex(t *testing.T) {
@@ -117,9 +122,7 @@ func TestStreamRejectsMalformedIndex(t *testing.T) {
 	}
 }
 
-// A sparse index pads earlier slots with hollow calls, and some
-// gateways omit ids entirely; either way an assembled call without an
-// id or name would be rejected on replay — success must be refused.
+/* Rejects incomplete tool calls. */
 func TestStreamRejectsHollowToolCalls(t *testing.T) {
 	// First fragment arrives at index 1: slot 0 is a fabricated shell.
 	_, _, err := streamFrom(t, `data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"c1","function":{"name":"t","arguments":"{}"}}]}}]}
@@ -144,8 +147,7 @@ data: [DONE]
 	}
 }
 
-// Legal SSE heartbeats — bare "data:" with no payload — must be
-// skipped, not treated as malformed data.
+/* Skips empty SSE heartbeats. */
 func TestStreamSkipsEmptyDataHeartbeat(t *testing.T) {
 	msg, _, err := streamFrom(t, `data: {"choices":[{"delta":{"content":"hi"}}]}
 
@@ -165,8 +167,7 @@ data: [DONE]
 	}
 }
 
-// Some gateways send the error frame as a bare string, not an object;
-// the provider's words must surface either way.
+/* Accepts a string error envelope. */
 func TestStreamSurfacesStringErrorFrame(t *testing.T) {
 	_, _, err := streamFrom(t, `data: {"error":"rate limited, slow down"}
 `)
@@ -175,8 +176,7 @@ func TestStreamSurfacesStringErrorFrame(t *testing.T) {
 	}
 }
 
-// Content that already streamed to the user must ride along with a
-// mid-stream error, not vanish from the returned message.
+/* Keeps content that arrived before an error. */
 func TestStreamPreservesPartialContentOnError(t *testing.T) {
 	msg, tokens, err := streamFrom(t, `data: {"choices":[{"delta":{"content":"partial answer"}}]}
 
@@ -190,8 +190,7 @@ data: {"error":{"message":"upstream died"}}
 	}
 }
 
-// Providers may omit arguments for zero-arg tools; tools unmarshal
-// their args, so "" must be normalized to valid JSON.
+/* Fills missing arguments for zero-argument tools. */
 func TestStreamNormalizesEmptyArguments(t *testing.T) {
 	msg, _, err := streamFrom(t, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"current_time"}}]}}]}
 
@@ -208,7 +207,7 @@ data: [DONE]
 }
 
 func TestStreamRejectsExplicitWrongRole(t *testing.T) {
-	_, _, err := streamFrom(t, `data: {"choices":[{"delta":{"role":"user","content":"promoted"}}]}
+	_, tokens, err := streamFrom(t, `data: {"choices":[{"delta":{"role":"user","content":"promoted"}}]}
 
 data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
 
@@ -216,6 +215,9 @@ data: [DONE]
 `)
 	if err == nil || !strings.Contains(err.Error(), "want assistant") {
 		t.Fatalf("wrong streamed role must error, got: %v", err)
+	}
+	if len(tokens) != 0 {
+		t.Fatalf("wrong-role content reached the callback: %v", tokens)
 	}
 }
 
@@ -250,6 +252,16 @@ func TestStreamLimitsTotalBytes(t *testing.T) {
 	_, _, err := streamFrom(t, body)
 	if err == nil || !strings.Contains(err.Error(), "exceeded") {
 		t.Fatalf("oversized stream must error, got: %v", err)
+	}
+}
+
+func TestStreamAcceptsLargeLineWithinLimit(t *testing.T) {
+	want := strings.Repeat("x", 1024*1024+1)
+	body := `data: {"choices":[{"delta":{"content":"` + want + `"},"finish_reason":"stop"}]}` + "\n\n"
+
+	msg, _, err := streamFrom(t, body)
+	if err != nil || msg.Content != want {
+		t.Fatalf("large stream line: len=%d err=%v", len(msg.Content), err)
 	}
 }
 
