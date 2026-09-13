@@ -1,4 +1,4 @@
-package llm
+package discovery
 
 import (
 	"context"
@@ -17,7 +17,6 @@ func TestNormalizeModelID(t *testing.T) {
 		{"openai/gpt-5-pro-2025-10-06", "gpt-5-pro"},
 		{"GPT-5.2", "gpt-5.2"},
 		{"gpt-4-0613", "gpt-4-0613"},
-		// Fine-tune colons stay in the id.
 		{"ft:gpt-4o-mini-2024-07-18:acme::9abc", "ft:gpt-4o-mini-2024-07-18:acme::9abc"},
 		{"meta-llama/llama-3-70b:free", "llama-3-70b:free"},
 	}
@@ -33,11 +32,11 @@ func TestNormalizeModelID(t *testing.T) {
 func TestFetchORCatalog(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"data":[
-			{"id":"deepseek/deepseek-v4-flash","context_length":1000000,
+			{"id":"deepseek/deepseek-v4-flash",
 			 "supported_parameters":["reasoning","tools","temperature"],
 			 "architecture":{"modality":"text->text"},
 			 "top_provider":{"max_completion_tokens":65536}},
-			{"id":"openai/sora-2","context_length":0,
+			{"id":"openai/sora-2",
 			 "architecture":{"modality":"text->video"}}
 		]}`))
 	}))
@@ -55,7 +54,7 @@ func TestFetchORCatalog(t *testing.T) {
 	if !ok {
 		t.Fatalf("catalog not indexed by normalized name: %v", index)
 	}
-	if om.ContextLength != 1000000 || om.Architecture.Modality != "text->text" {
+	if om.Architecture.Modality != "text->text" {
 		t.Fatalf("wrong entry: %+v", om)
 	}
 	if om.TopProvider.MaxCompletionTokens != 65536 {
@@ -69,23 +68,20 @@ func TestFetchORCatalog(t *testing.T) {
 	}
 }
 
-/* Prefers base models over routing variants. */
-
 func TestFetchORCatalogBaseBeatsVariant(t *testing.T) {
-	// Cover both list orders.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"data":[
-			{"id":"deepseek/deepseek-r1:free","context_length":32000,
+			{"id":"deepseek/deepseek-r1:free",
 			 "architecture":{"modality":"text->text"}},
-			{"id":"deepseek/deepseek-r1","context_length":128000,
+			{"id":"deepseek/deepseek-r1",
 			 "supported_parameters":["tools"],
 			 "architecture":{"modality":"text->text"}},
-			{"id":"vendor/basefirst","context_length":100000,
+			{"id":"vendor/basefirst",
 			 "supported_parameters":["tools"],
 			 "architecture":{"modality":"text->text"}},
-			{"id":"vendor/basefirst:free","context_length":5000,
+			{"id":"vendor/basefirst:free",
 			 "architecture":{"modality":"text->text"}},
-			{"id":"vendor/lonely:free","context_length":8000,
+			{"id":"vendor/lonely:free",
 			 "architecture":{"modality":"text->text"}}
 		]}`))
 	}))
@@ -99,33 +95,29 @@ func TestFetchORCatalogBaseBeatsVariant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetchORCatalog: %v", err)
 	}
-	if om := index["deepseek-r1"]; om.ContextLength != 128000 || !contains(om.SupportedParameters, "tools") {
+	if om := index["deepseek-r1"]; !contains(om.SupportedParameters, "tools") {
 		t.Fatalf("variant-first ordering clobbered the base entry: %+v", om)
 	}
-	if om := index["basefirst"]; om.ContextLength != 100000 || !contains(om.SupportedParameters, "tools") {
+	if om := index["basefirst"]; !contains(om.SupportedParameters, "tools") {
 		t.Fatalf("base-first ordering lost the base entry to its variant: %+v", om)
 	}
-	// A lone variant still fills the index.
-	if om := index["lonely"]; om.ContextLength != 8000 {
-		t.Fatalf("variant-only model missing from index: %+v", om)
+	if _, ok := index["lonely"]; !ok {
+		t.Fatal("variant-only model missing from index")
 	}
 }
 
-/* Prefers base models over dated snapshots. */
-
 func TestFetchORCatalogDatedSnapshotNeverBeatsBase(t *testing.T) {
-	// Cover both list orders.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"data":[
-			{"id":"openai/gpt-4o-2024-05-13","context_length":8000,
+			{"id":"openai/gpt-4o-2024-05-13",
 			 "architecture":{"modality":"text->text"}},
-			{"id":"openai/gpt-4o","context_length":128000,
+			{"id":"openai/gpt-4o",
 			 "supported_parameters":["tools"],
 			 "architecture":{"modality":"text->text"}},
-			{"id":"openai/base-two","context_length":200000,
+			{"id":"openai/base-two",
 			 "supported_parameters":["tools"],
 			 "architecture":{"modality":"text->text"}},
-			{"id":"openai/base-two-2024-01-01","context_length":4000,
+			{"id":"openai/base-two-2024-01-01",
 			 "architecture":{"modality":"text->text"}}
 		]}`))
 	}))
@@ -139,15 +131,13 @@ func TestFetchORCatalogDatedSnapshotNeverBeatsBase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetchORCatalog: %v", err)
 	}
-	if om := index["gpt-4o"]; om.ContextLength != 128000 || !contains(om.SupportedParameters, "tools") {
+	if om := index["gpt-4o"]; !contains(om.SupportedParameters, "tools") {
 		t.Fatalf("dated snapshot clobbered the base entry: %+v", om)
 	}
-	if om := index["base-two"]; om.ContextLength != 200000 || !contains(om.SupportedParameters, "tools") {
+	if om := index["base-two"]; !contains(om.SupportedParameters, "tools") {
 		t.Fatalf("base-first ordering lost the base to its snapshot: %+v", om)
 	}
 }
-
-/* Rejects an empty catalog. */
 
 func TestFetchORCatalogEmptyIsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -182,7 +172,7 @@ func TestFetchORCatalogHollowIsError(t *testing.T) {
 func TestFetchORCatalogSkipsHollowEntries(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"data":[{},
-			{"id":"openai/gpt-4o","context_length":128000,
+			{"id":"openai/gpt-4o",
 			 "architecture":{"modality":"text->text"}}
 		]}`))
 	}))
@@ -196,8 +186,11 @@ func TestFetchORCatalogSkipsHollowEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetchORCatalog: %v", err)
 	}
-	if len(index) != 1 || index["gpt-4o"].ContextLength != 128000 {
+	if len(index) != 1 {
 		t.Fatalf("wrong index: %+v", index)
+	}
+	if _, ok := index["gpt-4o"]; !ok {
+		t.Fatalf("hollow entry clobbered a real one: %+v", index)
 	}
 	if _, ok := index[""]; ok {
 		t.Fatal("hollow entry reached the index")

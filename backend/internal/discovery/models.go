@@ -1,4 +1,4 @@
-package llm
+package discovery
 
 import (
 	"bytes"
@@ -13,15 +13,13 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
-)
 
-/* Discovery requests stop after 30 seconds. */
+	"arx/internal/provider"
+)
 
 var httpClient = &http.Client{Timeout: 30 * time.Second}
 
 const maxCatalogBytes int64 = 8 << 20
-
-/* Provider models and their discovered capabilities. */
 
 type Model struct {
 	ID      string `json:"id"`
@@ -29,22 +27,17 @@ type Model struct {
 }
 
 type ModelInfo struct {
-	Spec          string
-	Provider      string
-	Model         string
-	KeyEnv        string
-	ContextWindow int
-	MaxOutput     int // provider's completion-token ceiling, 0 = unknown
-	Reasoning     bool
-	Tools         bool
-	ToolsKnown    bool
+	Spec       string
+	Provider   string
+	Model      string
+	MaxOutput  int
+	Tools      bool
+	ToolsKnown bool
 }
 
 type modelList struct {
 	Data []Model `json:"data"`
 }
-
-/* Fallback markers for models missing from OpenRouter. */
 
 var nonChatMarkers = []string{
 	"embedding", "tts", "whisper", "audio", "transcribe", "image", "sora",
@@ -52,10 +45,9 @@ var nonChatMarkers = []string{
 	"dall-e", "codex-mini", "computer-use",
 }
 
-func providerChatCapable(p Provider, id string) bool {
+func providerChatCapable(p provider.Provider, id string) bool {
 	if p.Name == "openai" {
 		bare := normalizeModelID(id)
-		// Keep current Chat Completions families.
 		if !strings.HasPrefix(bare, "gpt-5") {
 			return false
 		}
@@ -76,9 +68,7 @@ func chatCapable(id string) bool {
 	return true
 }
 
-/* Lists one provider's models. */
-
-func ListModels(ctx context.Context, p Provider) ([]Model, error) {
+func ListModels(ctx context.Context, p provider.Provider) ([]Model, error) {
 	endpoint, err := url.JoinPath(p.BaseURL, "models")
 	if err != nil {
 		return nil, err
@@ -87,7 +77,6 @@ func ListModels(ctx context.Context, p Provider) ([]Model, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	if k := p.Key(); k != "" {
 		req.Header.Set("Authorization", "Bearer "+k)
 	}
@@ -123,13 +112,11 @@ func ListModels(ctx context.Context, p Provider) ([]Model, error) {
 	return models, nil
 }
 
-/* Finds chat models for every configured provider. */
-
 func LoadModels(ctx context.Context) ([]ModelInfo, error) {
 	var out []ModelInfo
 	var errs []error
 	var names []string
-	for name, p := range Providers {
+	for name, p := range provider.Providers {
 		if p.KeyEnv == "" || p.Key() != "" {
 			names = append(names, name)
 		}
@@ -139,14 +126,13 @@ func LoadModels(ctx context.Context) ([]ModelInfo, error) {
 	}
 	sort.Strings(names)
 
-	// OpenRouter supplies cross-provider capabilities.
-	or, orErr := fetchORCatalog(ctx)
-	if orErr != nil {
-		errs = append(errs, fmt.Errorf("openrouter catalog: %w", orErr))
+	catalog, catalogErr := fetchORCatalog(ctx)
+	if catalogErr != nil {
+		errs = append(errs, fmt.Errorf("openrouter catalog: %w", catalogErr))
 	}
 
 	for _, name := range names {
-		p := Providers[name]
+		p := provider.Providers[name]
 		models, err := ListModels(ctx, p)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", name, err))
@@ -154,25 +140,20 @@ func LoadModels(ctx context.Context) ([]ModelInfo, error) {
 		}
 
 		for _, m := range models {
+			if !providerChatCapable(p, m.ID) {
+				continue
+			}
 			info := ModelInfo{
 				Spec:     name + "/" + m.ID,
 				Provider: name,
 				Model:    m.ID,
-				KeyEnv:   p.KeyEnv,
 			}
-
-			if !providerChatCapable(p, m.ID) {
-				continue
-			}
-
-			om, known := or[normalizeModelID(m.ID)]
+			om, known := catalog[normalizeModelID(m.ID)]
 			if known {
 				if mod := om.Architecture.Modality; mod != "" && !strings.HasSuffix(mod, "->text") {
 					continue
 				}
-				info.ContextWindow = om.ContextLength
 				info.MaxOutput = om.TopProvider.MaxCompletionTokens
-				info.Reasoning = contains(om.SupportedParameters, "reasoning")
 				if om.SupportedParameters != nil {
 					info.Tools = contains(om.SupportedParameters, "tools")
 					info.ToolsKnown = true
@@ -202,11 +183,11 @@ func decodeJSON(r io.Reader, v any) error {
 	}
 	var extra json.RawMessage
 	err = dec.Decode(&extra)
-	if err != io.EOF {
-		if err == nil {
-			return fmt.Errorf("multiple JSON values")
-		}
-		return fmt.Errorf("trailing JSON data: %w", err)
+	if err == io.EOF {
+		return nil
 	}
-	return nil
+	if err == nil {
+		return fmt.Errorf("multiple JSON values")
+	}
+	return fmt.Errorf("trailing JSON data: %w", err)
 }

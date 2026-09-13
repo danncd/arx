@@ -7,8 +7,6 @@ import (
 	"testing"
 )
 
-/* Clears a variable for one test. */
-
 func unset(t *testing.T, key string) {
 	t.Helper()
 	t.Setenv(key, "sentinel-to-register-cleanup")
@@ -31,9 +29,8 @@ func TestLoadDotEnv(t *testing.T) {
 	unset(t, "QUOTED")
 	unset(t, "EXPORTED")
 	unset(t, "TRAILING")
-	t.Setenv("ALREADY_SET", "from-env") // non-empty override must survive
-	t.Setenv("SET_EMPTY", "")           // deliberately blanked must STAY blank
-
+	t.Setenv("ALREADY_SET", "from-env")
+	t.Setenv("SET_EMPTY", "")
 	if err := LoadDotEnv(path); err != nil {
 		t.Fatalf("LoadDotEnv: %v", err)
 	}
@@ -71,13 +68,10 @@ func TestLoadDotEnvDoesNotCorruptQuoteBearingValues(t *testing.T) {
 	if got := os.Getenv("B"); got != `p'ass"word'` {
 		t.Errorf("B corrupted: %q", got)
 	}
-	// One balanced pair comes off; the inner quotes stay.
 	if got := os.Getenv("C"); got != "'inner'" {
 		t.Errorf("C: want one layer stripped, got %q", got)
 	}
 }
-
-/* Keeps dotenv values literal. */
 
 func TestLoadDotEnvValuesAreLiteral(t *testing.T) {
 	path := writeEnv(t, "ESCAPED=\"p\\\"q\"\nHASH=sk-abc#not-a-comment\nexport\tTABBED=works\n")
@@ -87,7 +81,6 @@ func TestLoadDotEnvValuesAreLiteral(t *testing.T) {
 	if err := LoadDotEnv(path); err != nil {
 		t.Fatal(err)
 	}
-	// One balanced pair stripped; the backslash escape stays literal.
 	if got := os.Getenv("ESCAPED"); got != `p\"q` {
 		t.Errorf("escapes must stay literal: %q", got)
 	}

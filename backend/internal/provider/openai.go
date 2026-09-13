@@ -1,4 +1,4 @@
-package llm
+package provider
 
 import (
 	"bytes"
@@ -8,72 +8,92 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync/atomic"
+	"time"
 	"unicode/utf8"
 )
 
-/* Chat requests follow the caller's deadline. */
+type OpenAIDialect struct {
+	NewTokenParam bool
+	ThinkingParam bool
+}
+
+type thinkingParam struct {
+	Type string `json:"type"`
+}
+
+type chatRequest struct {
+	Model               string         `json:"model"`
+	Messages            []Message      `json:"messages"`
+	MaxTokens           int            `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int            `json:"max_completion_tokens,omitempty"`
+	Tools               []ToolSpec     `json:"tools,omitempty"`
+	Thinking            *thinkingParam `json:"thinking,omitempty"`
+	Stream              bool           `json:"stream,omitempty"`
+}
+
+type chatResponse struct {
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+	Choices []struct {
+		Message      Message `json:"message"`
+		FinishReason string  `json:"finish_reason"`
+	} `json:"choices"`
+}
 
 var llmClient = &http.Client{}
 
 const maxChatBytes int64 = 8 << 20
 
-/* Chat wire types. */
+var idleTimeout = 120 * time.Second
 
-type Message struct {
-	Role             string     `json:"role"`
-	Content          string     `json:"content"`
-	ReasoningContent string     `json:"reasoning_content,omitempty"`
-	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID       string     `json:"tool_call_id,omitempty"`
+type idleReader struct {
+	inner io.Reader
+	timer *time.Timer
+	fired atomic.Bool
 }
 
-type ToolCall struct {
-	ID       string       `json:"id"`
-	Type     string       `json:"type"`
-	Function FunctionCall `json:"function"`
+func newIdleReader(inner io.Reader, cancel context.CancelFunc) *idleReader {
+	r := &idleReader{inner: inner}
+	r.timer = time.AfterFunc(idleTimeout, func() {
+		r.fired.Store(true)
+		cancel()
+	})
+	return r
 }
 
-type FunctionCall struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
+func (r *idleReader) Read(p []byte) (int, error) {
+	r.timer.Reset(idleTimeout)
+	return r.inner.Read(p)
 }
 
-type ToolSpec struct {
-	Type     string       `json:"type"`
-	Function ToolFunction `json:"function"`
-}
+func (r *idleReader) stop()          { r.timer.Stop() }
+func (r *idleReader) timedOut() bool { return r.fired.Load() }
 
-type ToolFunction struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Parameters  json.RawMessage `json:"parameters"`
-}
-
-type chatRequest struct {
-	Model               string     `json:"model"`
-	Messages            []Message  `json:"messages"`
-	MaxTokens           int        `json:"max_tokens,omitempty"`
-	MaxCompletionTokens int        `json:"max_completion_tokens,omitempty"`
-	Tools               []ToolSpec `json:"tools,omitempty"`
-	Stream              bool       `json:"stream,omitempty"`
-}
-
-/* Builds the provider's request shape. */
-
-func buildRequest(prof Profile, msgs []Message, tools []ToolSpec, stream bool) chatRequest {
+func (d OpenAIDialect) buildRequest(prof Profile, msgs []Message, tools []ToolSpec, opts Options, stream bool) chatRequest {
 	r := chatRequest{Model: prof.Model, Messages: msgs, Tools: tools, Stream: stream}
-	if prof.Provider.NewTokenParam {
-		r.MaxCompletionTokens = prof.MaxTokens
+	maxTokens := prof.MaxTokens
+	if opts.MaxTokens > 0 {
+		maxTokens = opts.MaxTokens
+	}
+	if d.NewTokenParam {
+		r.MaxCompletionTokens = maxTokens
 	} else {
-		r.MaxTokens = prof.MaxTokens
+		r.MaxTokens = maxTokens
+	}
+	if d.ThinkingParam && opts.Thinking != nil {
+		mode := "disabled"
+		if *opts.Thinking {
+			mode = "enabled"
+		}
+		r.Thinking = &thinkingParam{Type: mode}
 	}
 	return r
 }
 
-/* Sends a chat request and leaves a successful body open. */
-
-func postChat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec, stream bool) (*http.Response, error) {
-	body, err := json.Marshal(buildRequest(prof, msgs, tools, stream))
+func postChat(ctx context.Context, prof Profile, body chatRequest) (*http.Response, error) {
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +101,7 @@ func postChat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpe
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
@@ -102,28 +122,23 @@ func postChat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpe
 	return resp, nil
 }
 
-type chatResponse struct {
-	Error *struct {
-		Message string `json:"message"`
-	} `json:"error"`
-	Choices []struct {
-		Message      Message `json:"message"`
-		FinishReason string  `json:"finish_reason"`
-	} `json:"choices"`
-}
-
-/* Runs one non-streaming chat request. */
-
-func Chat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec) (Message, error) {
-	resp, err := postChat(ctx, prof, msgs, tools, false)
+func (d OpenAIDialect) Chat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec, opts Options) (Message, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	resp, err := postChat(ctx, prof, d.buildRequest(prof, msgs, tools, opts, false))
 	if err != nil {
 		return Message{}, err
 	}
 	defer resp.Body.Close()
 
-	limited := &io.LimitedReader{R: resp.Body, N: maxChatBytes + 1}
+	ir := newIdleReader(resp.Body, cancel)
+	defer ir.stop()
+	limited := &io.LimitedReader{R: ir, N: maxChatBytes + 1}
 	raw, err := io.ReadAll(limited)
 	if err != nil {
+		if ir.timedOut() {
+			return Message{}, fmt.Errorf("chat idle timeout after %s", idleTimeout)
+		}
 		return Message{}, fmt.Errorf("read chat response: %w", err)
 	}
 	if limited.N == 0 {
@@ -152,24 +167,6 @@ func Chat(ctx context.Context, prof Profile, msgs []Message, tools []ToolSpec) (
 	normalizeReply(&m)
 	return m, completionErr(m, cr.Choices[0].FinishReason)
 }
-
-/* Fills reply fields providers may omit. */
-
-func normalizeReply(m *Message) {
-	if m.Role == "" {
-		m.Role = "assistant"
-	}
-	for i := range m.ToolCalls {
-		if m.ToolCalls[i].Type == "" {
-			m.ToolCalls[i].Type = "function"
-		}
-		if m.ToolCalls[i].Function.Arguments == "" {
-			m.ToolCalls[i].Function.Arguments = "{}"
-		}
-	}
-}
-
-/* Rejects incomplete replies. */
 
 func completionErr(msg Message, finish string) error {
 	if finish == "" {

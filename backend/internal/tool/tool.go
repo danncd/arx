@@ -6,13 +6,26 @@ import (
 	"sort"
 	"unicode/utf8"
 
-	"arx/internal/llm"
+	"arx/internal/provider"
 )
+
+const maxToolBytes = 64 * 1024
+
+func Command(args string) string {
+	var a struct {
+		Command string `json:"command"`
+	}
+	if json.Unmarshal([]byte(args), &a) != nil {
+		return ""
+	}
+	return a.Command
+}
 
 type Tool struct {
 	Name        string
 	Description string
 	Schema      json.RawMessage
+	Mutating    bool
 	Run         func(ctx context.Context, args json.RawMessage) (string, error)
 }
 
@@ -25,16 +38,21 @@ func Get(name string) (Tool, bool) {
 	return t, ok
 }
 
-func Specs() []llm.ToolSpec {
-	var out []llm.ToolSpec
+func IsMutating(name string) bool {
+	t, ok := registry[name]
+	return ok && t.Mutating
+}
+
+func Specs() []provider.ToolSpec {
+	out := make([]provider.ToolSpec, 0, len(registry))
 	for _, t := range registry {
 		schema := t.Schema
 		if schema == nil {
 			schema = json.RawMessage(`{"type":"object","properties":{}}`)
 		}
-		out = append(out, llm.ToolSpec{
+		out = append(out, provider.ToolSpec{
 			Type: "function",
-			Function: llm.ToolFunction{
+			Function: provider.ToolFunction{
 				Name:        t.Name,
 				Description: t.Description,
 				Parameters:  schema,

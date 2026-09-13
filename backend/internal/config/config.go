@@ -6,8 +6,6 @@ import (
 	"strings"
 )
 
-/* Loads literal dotenv values without replacing the environment. */
-
 func LoadDotEnv(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -16,13 +14,12 @@ func LoadDotEnv(path string) error {
 		}
 		return err
 	}
-	content := strings.TrimPrefix(string(data), "\ufeff") // Strip an editor BOM.
+	content := strings.TrimPrefix(string(data), "\ufeff")
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		// Accept export KEY=value.
 		if rest, ok := strings.CutPrefix(line, "export"); ok &&
 			len(rest) > 0 && (rest[0] == ' ' || rest[0] == '\t') {
 			line = strings.TrimSpace(rest)
@@ -33,7 +30,6 @@ func LoadDotEnv(path string) error {
 		}
 		k = strings.TrimSpace(k)
 		v = strings.TrimSpace(v)
-		// Strip one balanced quote pair.
 		if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
 			v = v[1 : len(v)-1]
 		}

@@ -8,14 +8,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	"arx/internal/llm"
+	"arx/internal/provider"
 	"arx/internal/tool"
 )
-
-/* Records turn events. */
 
 type recSink struct {
 	tokens   []string
@@ -23,7 +22,8 @@ type recSink struct {
 	failures []bool
 }
 
-func (r *recSink) Token(s string, _ bool) { r.tokens = append(r.tokens, s) }
+func (r *recSink) Token(s string, _ bool)   { r.tokens = append(r.tokens, s) }
+func (r *recSink) ToolStart(string, string) {}
 func (r *recSink) ToolResult(name, out string, _ time.Duration, failed bool) {
 	r.tools = append(r.tools, name+"→"+out)
 	r.failures = append(r.failures, failed)
@@ -51,8 +51,6 @@ func init() {
 	})
 }
 
-/* Runs a full tool round. */
-
 func TestRunTurnToolRound(t *testing.T) {
 	requests := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -67,7 +65,6 @@ func TestRunTurnToolRound(t *testing.T) {
 				`data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}` + "\n\n" +
 				"data: [DONE]\n"))
 		default:
-			// The tool result must have come back, tied to its call.
 			if !strings.Contains(string(body), `"tool_call_id":"c1"`) ||
 				!strings.Contains(string(body), `echoed:{\"s\":1}`) {
 				t.Errorf("round 2 request missing the tool result: %s", body)
@@ -79,8 +76,8 @@ func TestRunTurnToolRound(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	prof := llm.Profile{
-		Provider: llm.Provider{Name: "fake", BaseURL: srv.URL},
+	prof := provider.Profile{
+		Provider: provider.Provider{Name: "fake", Dialect: provider.OpenAIDialect{}, BaseURL: srv.URL},
 		Model:    "m", MaxTokens: 100, Tools: true, ToolsKnown: true,
 	}
 	c := New(prof, "system prompt")
@@ -98,13 +95,10 @@ func TestRunTurnToolRound(t *testing.T) {
 	if strings.Join(sink.tokens, "") != "done" {
 		t.Fatalf("tokens: %v", sink.tokens)
 	}
-	// system + user + assistant(calls) + tool + assistant(answer)
 	if len(c.msgs) != 5 {
 		t.Fatalf("transcript length = %d, want 5: %+v", len(c.msgs), c.msgs)
 	}
 }
-
-/* Stops a tool loop at the step limit. */
 
 func TestRunTurnStepLimit(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -114,7 +108,7 @@ func TestRunTurnStepLimit(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	prof := llm.Profile{Provider: llm.Provider{Name: "fake", BaseURL: srv.URL}, Model: "m", MaxTokens: 100}
+	prof := provider.Profile{Provider: provider.Provider{Name: "fake", Dialect: provider.OpenAIDialect{}, BaseURL: srv.URL}, Model: "m", MaxTokens: 100}
 	c := New(prof, "sys")
 	c.maxSteps = 3
 
@@ -122,7 +116,6 @@ func TestRunTurnStepLimit(t *testing.T) {
 	if !errors.Is(err, ErrStepLimit) {
 		t.Fatalf("want ErrStepLimit, got: %v", err)
 	}
-	// 3 rounds ran: system + user + 3×(assistant + tool result).
 	if len(c.msgs) != 8 {
 		t.Fatalf("transcript length = %d, want 8", len(c.msgs))
 	}
@@ -135,7 +128,7 @@ func TestRunTurnStopsToolBatchAfterCancellation(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	prof := llm.Profile{Provider: llm.Provider{Name: "fake", BaseURL: srv.URL}, Model: "m"}
+	prof := provider.Profile{Provider: provider.Provider{Name: "fake", Dialect: provider.OpenAIDialect{}, BaseURL: srv.URL}, Model: "m"}
 	c := New(prof, "sys")
 	ctx, cancel := context.WithCancel(context.Background())
 	sink := &cancelSink{cancel: cancel}
@@ -163,8 +156,8 @@ func TestRunTurnDoesNotOfferUnsupportedTools(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	prof := llm.Profile{
-		Provider: llm.Provider{Name: "fake", BaseURL: srv.URL},
+	prof := provider.Profile{
+		Provider: provider.Provider{Name: "fake", Dialect: provider.OpenAIDialect{}, BaseURL: srv.URL},
 		Model:    "m", ToolsKnown: true,
 	}
 	if err := New(prof, "sys").RunTurn(context.Background(), "hello", &recSink{}); err != nil {
@@ -183,7 +176,7 @@ func TestRunTurnOffersToolsWhenCapabilityIsUnknown(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	prof := llm.Profile{Provider: llm.Provider{Name: "fake", BaseURL: srv.URL}, Model: "m"}
+	prof := provider.Profile{Provider: provider.Provider{Name: "fake", Dialect: provider.OpenAIDialect{}, BaseURL: srv.URL}, Model: "m"}
 	if err := New(prof, "sys").RunTurn(context.Background(), "hello", &recSink{}); err != nil {
 		t.Fatalf("RunTurn: %v", err)
 	}
@@ -196,8 +189,8 @@ func TestRunTurnRejectsDisabledToolCalls(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	prof := llm.Profile{
-		Provider: llm.Provider{Name: "fake", BaseURL: srv.URL},
+	prof := provider.Profile{
+		Provider: provider.Provider{Name: "fake", Dialect: provider.OpenAIDialect{}, BaseURL: srv.URL},
 		Model:    "m", ToolsKnown: true,
 	}
 	c := New(prof, "sys")
@@ -212,7 +205,7 @@ func TestRunTurnRejectsDisabledToolCalls(t *testing.T) {
 }
 
 func TestRunTurnRejectsCanceledEntryWithoutMutation(t *testing.T) {
-	prof := llm.Profile{Provider: llm.Provider{Name: "fake", BaseURL: "http://unused.invalid"}, Model: "m"}
+	prof := provider.Profile{Provider: provider.Provider{Name: "fake", Dialect: provider.OpenAIDialect{}, BaseURL: "http://unused.invalid"}, Model: "m"}
 	c := New(prof, "sys")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -227,7 +220,7 @@ func TestRunTurnRejectsCanceledEntryWithoutMutation(t *testing.T) {
 }
 
 func TestRunTurnRejectsInvalidUTF8(t *testing.T) {
-	prof := llm.Profile{Provider: llm.Provider{Name: "fake", BaseURL: "http://unused.invalid"}, Model: "m"}
+	prof := provider.Profile{Provider: provider.Provider{Name: "fake", Dialect: provider.OpenAIDialect{}, BaseURL: "http://unused.invalid"}, Model: "m"}
 	bad := string([]byte{'a', 0xff, 'b'})
 
 	if err := New(prof, bad).RunTurn(context.Background(), "hello", &recSink{}); err == nil || !strings.Contains(err.Error(), "system prompt") {
@@ -255,7 +248,7 @@ func TestRunTurnRejectsInvalidToolOutput(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	prof := llm.Profile{Provider: llm.Provider{Name: "fake", BaseURL: srv.URL}, Model: "m"}
+	prof := provider.Profile{Provider: provider.Provider{Name: "fake", Dialect: provider.OpenAIDialect{}, BaseURL: srv.URL}, Model: "m"}
 	c := New(prof, "sys")
 	err := c.RunTurn(context.Background(), "run", &recSink{})
 	if err == nil || !strings.Contains(err.Error(), "invalid UTF-8") {
@@ -284,7 +277,7 @@ func TestRunTurnReplaysReasoningWithToolCall(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	prof := llm.Profile{Provider: llm.Provider{Name: "fake", BaseURL: srv.URL}, Model: "m"}
+	prof := provider.Profile{Provider: provider.Provider{Name: "fake", Dialect: provider.OpenAIDialect{}, BaseURL: srv.URL}, Model: "m"}
 	if err := New(prof, "sys").RunTurn(context.Background(), "run", &recSink{}); err != nil {
 		t.Fatalf("RunTurn: %v", err)
 	}
@@ -315,7 +308,7 @@ func TestRunTurnKeepsDisplayedPartialAnswer(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	prof := llm.Profile{Provider: llm.Provider{Name: "fake", BaseURL: srv.URL}, Model: "m"}
+	prof := provider.Profile{Provider: provider.Provider{Name: "fake", Dialect: provider.OpenAIDialect{}, BaseURL: srv.URL}, Model: "m"}
 	c := New(prof, "sys")
 	if err := c.RunTurn(context.Background(), "first", &recSink{}); err == nil {
 		t.Fatal("broken first stream must fail")
@@ -346,11 +339,75 @@ func TestRunTurnReportsToolFailureExplicitly(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	sink := &recSink{}
-	prof := llm.Profile{Provider: llm.Provider{Name: "fake", BaseURL: srv.URL}, Model: "m"}
+	prof := provider.Profile{Provider: provider.Provider{Name: "fake", Dialect: provider.OpenAIDialect{}, BaseURL: srv.URL}, Model: "m"}
 	if err := New(prof, "sys").RunTurn(context.Background(), "run", sink); err != nil {
 		t.Fatalf("RunTurn: %v", err)
 	}
 	if len(sink.failures) != 1 || sink.failures[0] {
 		t.Fatalf("successful output was marked failed: %+v", sink)
+	}
+}
+
+func TestSteerFoldsIntoTurn(t *testing.T) {
+	var c *Controller
+	var once sync.Once
+	steered := make(chan struct{})
+
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		body, _ := io.ReadAll(r.Body)
+		switch requests {
+		case 1:
+			once.Do(func() {
+				if !c.Steer("also check the tests") {
+					t.Error("steer was rejected during an active turn")
+				}
+				close(steered)
+			})
+			w.Write([]byte(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"test_echo","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}` + "\n\n" +
+				"data: [DONE]\n"))
+		default:
+			if !strings.Contains(string(body), "also check the tests") {
+				t.Errorf("steer not folded into the next request: %s", body)
+			}
+			w.Write([]byte(`data: {"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
+				"data: [DONE]\n"))
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	prof := provider.Profile{Provider: provider.Provider{Name: "fake", Dialect: provider.OpenAIDialect{}, BaseURL: srv.URL}, Model: "m"}
+	c = New(prof, "sys")
+	if err := c.RunTurn(context.Background(), "start", &recSink{}); err != nil {
+		t.Fatalf("RunTurn: %v", err)
+	}
+	<-steered
+	if requests != 2 {
+		t.Fatalf("want 2 rounds, got %d", requests)
+	}
+}
+
+func TestSteerRejectedOutsideTurn(t *testing.T) {
+	c := New(provider.Profile{Provider: provider.Provider{Name: "fake", Dialect: provider.OpenAIDialect{}}, Model: "m"}, "sys")
+	if c.Steer("nobody home") {
+		t.Fatal("steer accepted with no turn running")
+	}
+}
+
+func TestSteerDroppedAfterTurn(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}` + "\n\n" +
+			"data: [DONE]\n"))
+	}))
+	t.Cleanup(srv.Close)
+
+	prof := provider.Profile{Provider: provider.Provider{Name: "fake", Dialect: provider.OpenAIDialect{}, BaseURL: srv.URL}, Model: "m"}
+	c := New(prof, "sys")
+	if err := c.RunTurn(context.Background(), "hi", &recSink{}); err != nil {
+		t.Fatalf("RunTurn: %v", err)
+	}
+	if c.Steer("late") {
+		t.Fatal("steer accepted after the turn ended")
 	}
 }

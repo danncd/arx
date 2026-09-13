@@ -1,4 +1,4 @@
-package llm
+package discovery
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"arx/internal/provider"
 )
 
 func TestListModels(t *testing.T) {
@@ -23,7 +25,7 @@ func TestListModels(t *testing.T) {
 	defer srv.Close()
 
 	t.Setenv("FAKE_KEY", "sk-test")
-	p := Provider{Name: "fake", BaseURL: srv.URL + "/", KeyEnv: "FAKE_KEY", Dialect: OpenAI}
+	p := provider.Provider{Name: "fake", BaseURL: srv.URL + "/", KeyEnv: "FAKE_KEY", Dialect: provider.OpenAIDialect{}}
 
 	models, err := ListModels(context.Background(), p)
 	if err != nil {
@@ -41,7 +43,7 @@ func TestListModelsSurfacesHTTPError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := ListModels(context.Background(), Provider{Name: "fake", BaseURL: srv.URL})
+	_, err := ListModels(context.Background(), provider.Provider{Name: "fake", BaseURL: srv.URL})
 	if err == nil {
 		t.Fatal("a 401 must come back as an error")
 	}
@@ -50,18 +52,16 @@ func TestListModelsSurfacesHTTPError(t *testing.T) {
 	}
 }
 
-/* Swaps provider discovery for one test. */
-
 func withFakeWorld(t *testing.T, providerURL, orURL string) {
 	t.Helper()
-	oldProviders := Providers
-	Providers = map[string]Provider{
-		"fake": {Name: "fake", BaseURL: providerURL, KeyEnv: "FAKE_KEY", Dialect: OpenAI},
+	oldProviders := provider.Providers
+	provider.Providers = map[string]provider.Provider{
+		"fake": {Name: "fake", BaseURL: providerURL, KeyEnv: "FAKE_KEY", Dialect: provider.OpenAIDialect{}},
 	}
 	oldOR := orModelsURL
 	orModelsURL = orURL
 	t.Cleanup(func() {
-		Providers = oldProviders
+		provider.Providers = oldProviders
 		orModelsURL = oldOR
 	})
 	t.Setenv("FAKE_KEY", "sk-test")
@@ -84,10 +84,7 @@ func providerServing(t *testing.T, ids ...string) *httptest.Server {
 	return srv
 }
 
-/* Uses catalog authority when available. */
-
 func TestLoadModelsAuthorityFilter(t *testing.T) {
-	// Cover metadata, normalization and name filters.
 	prov := providerServing(t,
 		"chat-model", "tool-model", "video-model", "img-out-model",
 		"unknown-model", "sparse-model", "whisper-native", "turbo-instruct",
@@ -132,38 +129,34 @@ func TestLoadModelsAuthorityFilter(t *testing.T) {
 	if len(models) != 6 {
 		t.Fatalf("want 6 survivors, got: %+v", models)
 	}
-	// Missing architecture keeps other metadata.
 	drift := byName["drift-model"]
-	if drift.ContextWindow != 99000 || !drift.Tools || !drift.ToolsKnown {
+	if !drift.Tools || !drift.ToolsKnown {
 		t.Fatalf("drifted entry lost its enrichment: %+v", drift)
 	}
 	chat := byName["chat-model"]
-	if chat.ContextWindow != 128000 || !chat.Reasoning || chat.Tools || !chat.ToolsKnown {
-		t.Fatalf("chat-model: want ctx 128000, R and NOT T: %+v", chat)
+	if chat.Tools || !chat.ToolsKnown {
+		t.Fatalf("chat-model: want no tools capability but known: %+v", chat)
 	}
 	tool := byName["tool-model"]
-	if tool.ContextWindow != 64000 || tool.Reasoning || !tool.Tools || !tool.ToolsKnown {
-		t.Fatalf("tool-model: want ctx 64000, T and NOT R: %+v", tool)
+	if !tool.Tools || !tool.ToolsKnown {
+		t.Fatalf("tool-model: want tools capability: %+v", tool)
 	}
 	if tool.MaxOutput != 4096 {
 		t.Fatalf("completion ceiling not carried into the catalog: %+v", tool)
 	}
 	unknown := byName["unknown-model"]
-	if unknown.ContextWindow != 0 || unknown.Reasoning || unknown.Tools || unknown.ToolsKnown {
+	if unknown.Tools || unknown.ToolsKnown {
 		t.Fatalf("join miss must pass through UNenriched: %+v", unknown)
 	}
 	sparse := byName["sparse-model"]
-	if sparse.ContextWindow != 32000 || sparse.Tools || sparse.ToolsKnown {
+	if sparse.Tools || sparse.ToolsKnown {
 		t.Fatalf("missing capability metadata must stay unknown: %+v", sparse)
 	}
-	// Provider snapshots join the base model.
 	dated := byName["CHAT-MODEL-2025-01-01"]
-	if dated.ContextWindow != 128000 || !dated.Reasoning {
+	if !dated.ToolsKnown {
 		t.Fatalf("normalization lost the dated/cased join: %+v", dated)
 	}
 }
-
-/* Keeps heuristic results when OpenRouter fails. */
 
 func TestLoadModelsDegradesOpenWhenORDown(t *testing.T) {
 	prov := providerServing(t, "chat-model", "video-model", "whisper-x")
@@ -184,13 +177,11 @@ func TestLoadModelsDegradesOpenWhenORDown(t *testing.T) {
 		if m.Model == "whisper-x" {
 			t.Fatalf("heuristic must still filter with OR down: %+v", models)
 		}
-		if m.ContextWindow != 0 {
+		if m.ToolsKnown || m.MaxOutput != 0 {
 			t.Fatalf("nothing should be enriched with OR down: %+v", m)
 		}
 	}
 }
-
-/* Keeps provider models when OpenRouter is empty. */
 
 func TestLoadModelsSurvivesEmptyORCatalog(t *testing.T) {
 	prov := providerServing(t, "chat-model")
@@ -209,13 +200,11 @@ func TestLoadModelsSurvivesEmptyORCatalog(t *testing.T) {
 	}
 }
 
-/* Keeps current OpenAI chat models. */
-
 func TestProviderChatCapableModernOpenAIOnly(t *testing.T) {
-	openai := Provider{Name: "openai"}
-	deepseek := Provider{Name: "deepseek"}
+	openai := provider.Provider{Name: "openai"}
+	deepseek := provider.Provider{Name: "deepseek"}
 	cases := []struct {
-		p    Provider
+		p    provider.Provider
 		id   string
 		want bool
 	}{
@@ -241,13 +230,11 @@ func TestListModelsRejectsGarbage(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := ListModels(context.Background(), Provider{Name: "fake", BaseURL: srv.URL})
+	_, err := ListModels(context.Background(), provider.Provider{Name: "fake", BaseURL: srv.URL})
 	if err == nil {
 		t.Fatal("non-JSON body must error, not return empty models")
 	}
 }
-
-/* Rejects a missing data field. */
 
 func TestListModelsRejectsMissingDataKey(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -255,7 +242,7 @@ func TestListModelsRejectsMissingDataKey(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := ListModels(context.Background(), Provider{Name: "fake", BaseURL: srv.URL})
+	_, err := ListModels(context.Background(), provider.Provider{Name: "fake", BaseURL: srv.URL})
 	if err == nil || !strings.Contains(err.Error(), "no data field") {
 		t.Fatalf("missing data key must error, got: %v", err)
 	}
@@ -267,7 +254,7 @@ func TestListModelsSkipsEmptyIDs(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	models, err := ListModels(context.Background(), Provider{Name: "fake", BaseURL: srv.URL})
+	models, err := ListModels(context.Background(), provider.Provider{Name: "fake", BaseURL: srv.URL})
 	if err != nil {
 		t.Fatalf("ListModels: %v", err)
 	}
@@ -282,7 +269,7 @@ func TestListModelsRejectsOnlyEmptyIDs(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := ListModels(context.Background(), Provider{Name: "fake", BaseURL: srv.URL})
+	_, err := ListModels(context.Background(), provider.Provider{Name: "fake", BaseURL: srv.URL})
 	if err == nil || !strings.Contains(err.Error(), "missing an id") {
 		t.Fatalf("hollow model list must error, got: %v", err)
 	}
@@ -294,7 +281,7 @@ func TestListModelsRejectsTrailingJSON(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := ListModels(context.Background(), Provider{Name: "fake", BaseURL: srv.URL})
+	_, err := ListModels(context.Background(), provider.Provider{Name: "fake", BaseURL: srv.URL})
 	if err == nil || !strings.Contains(err.Error(), "multiple JSON values") {
 		t.Fatalf("trailing JSON must error, got: %v", err)
 	}
@@ -318,14 +305,14 @@ func TestDecodeJSONRejectsInvalidUTF8(t *testing.T) {
 }
 
 func TestLoadModelsSkipsCatalogWithoutProviders(t *testing.T) {
-	oldProviders := Providers
+	oldProviders := provider.Providers
 	oldOR := orModelsURL
-	Providers = map[string]Provider{
+	provider.Providers = map[string]provider.Provider{
 		"fake": {Name: "fake", BaseURL: "http://unused.invalid", KeyEnv: "ARX_TEST_UNSET_KEY"},
 	}
 	orModelsURL = "http://unused.invalid"
 	t.Cleanup(func() {
-		Providers = oldProviders
+		provider.Providers = oldProviders
 		orModelsURL = oldOR
 	})
 	t.Setenv("ARX_TEST_UNSET_KEY", "")
@@ -351,8 +338,8 @@ func TestLoadModelsRejectsNativeNonChatIDs(t *testing.T) {
 	}))
 	t.Cleanup(or.Close)
 	withFakeWorld(t, prov.URL, or.URL)
-	Providers = map[string]Provider{
-		"openai": {Name: "openai", BaseURL: prov.URL, KeyEnv: "FAKE_KEY", Dialect: OpenAI},
+	provider.Providers = map[string]provider.Provider{
+		"openai": {Name: "openai", BaseURL: prov.URL, KeyEnv: "FAKE_KEY", Dialect: provider.OpenAIDialect{}},
 	}
 
 	models, err := LoadModels(context.Background())
@@ -363,8 +350,6 @@ func TestLoadModelsRejectsNativeNonChatIDs(t *testing.T) {
 		t.Fatalf("native non-chat models must be dropped: %+v", models)
 	}
 }
-
-/* Skips providers without keys. */
 
 func TestLoadModelsSkipsKeylessProviders(t *testing.T) {
 	prov := providerServing(t, "chat-model")
@@ -378,7 +363,7 @@ func TestLoadModelsSkipsKeylessProviders(t *testing.T) {
 	}))
 	t.Cleanup(or.Close)
 	withFakeWorld(t, prov.URL, or.URL)
-	Providers["nokey"] = Provider{Name: "nokey", BaseURL: nokey.URL, KeyEnv: "ARX_TEST_UNSET_KEY"}
+	provider.Providers["nokey"] = provider.Provider{Name: "nokey", BaseURL: nokey.URL, KeyEnv: "ARX_TEST_UNSET_KEY"}
 	t.Setenv("ARX_TEST_UNSET_KEY", "")
 
 	models, err := LoadModels(context.Background())
@@ -390,8 +375,6 @@ func TestLoadModelsSkipsKeylessProviders(t *testing.T) {
 	}
 }
 
-/* Model filters ignore case. */
-
 func TestChatCapableIsCaseInsensitive(t *testing.T) {
 	for _, id := range []string{"DALL-E-3", "Whisper-1", "TTS-1-HD"} {
 		if chatCapable(id) {
@@ -401,10 +384,10 @@ func TestChatCapableIsCaseInsensitive(t *testing.T) {
 	if !chatCapable("GPT-5.2") {
 		t.Error("chatCapable(GPT-5.2) = false, want true")
 	}
-	if providerChatCapable(Provider{Name: "openai"}, "GPT-5.3-CODEX-2026-02-24") {
+	if providerChatCapable(provider.Provider{Name: "openai"}, "GPT-5.3-CODEX-2026-02-24") {
 		t.Error("native Codex snapshot must be rejected")
 	}
-	if !providerChatCapable(Provider{Name: "fake"}, "vendor-codex-chat") {
+	if !providerChatCapable(provider.Provider{Name: "fake"}, "vendor-codex-chat") {
 		t.Error("Codex names from other providers must not be rejected")
 	}
 }

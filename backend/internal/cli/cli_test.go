@@ -7,71 +7,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"arx/internal/llm"
+	"arx/internal/agent"
 	"arx/internal/tool"
 )
-
-func testModels() []llm.ModelInfo {
-	return []llm.ModelInfo{
-		{
-			Spec: "deepseek/deepseek-v4-flash", Provider: "deepseek",
-			Model: "deepseek-v4-flash", ContextWindow: 128000,
-			MaxOutput: 4096, Reasoning: true, Tools: true, ToolsKnown: true,
-		},
-		{Spec: "openai/gpt-5-nano", Provider: "openai", Model: "gpt-5-nano"},
-	}
-}
-
-/* Copies model capabilities and adopts the completion ceiling. */
-
-func TestResolveProfile(t *testing.T) {
-	prof, err := resolveProfile("deepseek/deepseek-v4-flash", testModels())
-	if err != nil {
-		t.Fatalf("resolveProfile: %v", err)
-	}
-	if !prof.Tools || !prof.ToolsKnown {
-		t.Fatalf("capability flags not copied: %+v", prof)
-	}
-	if prof.MaxTokens != 4096 {
-		t.Fatalf("MaxTokens not clamped to the catalog ceiling: %+v", prof)
-	}
-
-	// Catalog misses keep capabilities unknown and the default cap.
-	prof, err = resolveProfile("deepseek/uncatalogued", testModels())
-	if err != nil || prof.Tools || prof.ToolsKnown {
-		t.Fatalf("catalog miss must stay unknown: %+v err=%v", prof, err)
-	}
-	if prof.MaxTokens != 8192 {
-		t.Fatalf("catalog miss must keep the default cap: %+v", prof)
-	}
-
-	if _, err := resolveProfile("nope/model", testModels()); err == nil {
-		t.Fatal("unknown provider must fail")
-	}
-}
-
-func TestDefaultSpecHonorsARXModel(t *testing.T) {
-	t.Setenv("ARX_MODEL", "openai/gpt-5-nano")
-	if got := defaultSpec(testModels()); got != "openai/gpt-5-nano" {
-		t.Fatalf("ARX_MODEL ignored: %q", got)
-	}
-}
 
 func TestBashIsRegistered(t *testing.T) {
 	registerTools()
 	if _, ok := tool.Get(tool.Bash.Name); !ok {
 		t.Fatal("bash was not registered")
-	}
-}
-
-func TestDefaultSpecRequiresCatalogMatch(t *testing.T) {
-	t.Setenv("ARX_MODEL", "")
-	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
-	models := []llm.ModelInfo{{Spec: "openai/gpt-5-nano", Provider: "openai", Model: "gpt-5-nano"}}
-	if got := defaultSpec(models); got != "openai/gpt-5-nano" {
-		t.Fatalf("default selected an undiscovered model: %q", got)
 	}
 }
 
@@ -139,6 +85,119 @@ func TestPlainSinkKeepsOnlyFinalToolStep(t *testing.T) {
 	sink.Token("Done", false)
 	if got := sink.answer.String(); got != "Done" {
 		t.Fatalf("buffered answer = %q, want Done", got)
+	}
+}
+
+func openCard(t *testing.T) (model, approvalMsg) {
+	t.Helper()
+	m := newModel(nil, "test")
+	m.tall = 30
+	ask := approvalMsg{
+		req:  agent.Request{Tool: "bash", Args: `{"command":"make"}`},
+		resp: make(chan agent.Outcome, 1),
+	}
+	updated, _ := m.Update(ask)
+	m = updated.(model)
+	if m.ask.pending == nil {
+		t.Fatal("card did not open")
+	}
+	m.ask.opened = time.Time{}
+	return m, ask
+}
+
+func TestApprovalCardShortcutResolves(t *testing.T) {
+	m, ask := openCard(t)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(model)
+	if m.ask.pending != nil {
+		t.Fatal("card did not close")
+	}
+	select {
+	case out := <-ask.resp:
+		if out != agent.AlwaysSession {
+			t.Fatalf("outcome = %v, want AlwaysSession", out)
+		}
+	default:
+		t.Fatal("no outcome delivered")
+	}
+}
+
+func TestApprovalCardArrowsAndEnter(t *testing.T) {
+	m, ask := openCard(t)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m = updated.(model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m = updated.(model)
+	if m.ask.sel != 2 {
+		t.Fatalf("selection did not move: %d", m.ask.sel)
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m = updated.(model)
+	if m.ask.sel != 2 {
+		t.Fatalf("selection did not clamp: %d", m.ask.sel)
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if m.ask.pending != nil || m.waiting {
+		t.Fatal("enter did not resolve the card")
+	}
+	if out := <-ask.resp; out != agent.Reject {
+		t.Fatalf("outcome = %v, want Reject", out)
+	}
+}
+
+func TestRunningRowShowsThenClears(t *testing.T) {
+	m := newModel(nil, "test")
+	m.vp.Width = 80
+	updated, cmd := m.Update(toolStartMsg{name: "bash", args: `{"command":"go test ./..."}`})
+	m = updated.(model)
+	if m.run.running != "bash" || m.run.hint != "go test ./..." || cmd == nil {
+		t.Fatalf("running row not set: running=%q hint=%q cmd=%v", m.run.running, m.run.hint, cmd)
+	}
+	if !strings.Contains(m.transcript(), "bash") || !strings.Contains(m.transcript(), "go test ./...") {
+		t.Fatalf("running row not rendered: %q", m.transcript())
+	}
+	updated, _ = m.Update(toolMsg{name: "bash", out: "ok", took: time.Second})
+	m = updated.(model)
+	if m.run.running != "" {
+		t.Fatal("running row not cleared on result")
+	}
+	updated, cmd = m.Update(spinner.TickMsg{})
+	m = updated.(model)
+	if m.run.spinning || cmd != nil {
+		t.Fatalf("spinner did not stop: spinning=%v cmd=%v", m.run.spinning, cmd)
+	}
+}
+
+func TestApprovalSettleIgnoresEarlyApprove(t *testing.T) {
+	m := newModel(nil, "test")
+	m.tall = 30
+	ask := approvalMsg{req: agent.Request{Tool: "bash", Args: `{"command":"make"}`}, resp: make(chan agent.Outcome, 1)}
+	updated, _ := m.Update(ask)
+	m = updated.(model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	m = updated.(model)
+	if m.ask.pending == nil {
+		t.Fatal("early keystroke approved during the settle window")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m = updated.(model)
+	if m.ask.pending != nil {
+		t.Fatal("deny did not resolve")
+	}
+	if out := <-ask.resp; out != agent.Reject {
+		t.Fatalf("deny outcome = %v", out)
+	}
+}
+
+func TestStaleCardClearsOnTurnEnd(t *testing.T) {
+	m := newModel(nil, "test")
+	ask := approvalMsg{req: agent.Request{Tool: "bash"}, resp: make(chan agent.Outcome, 1)}
+	updated, _ := m.Update(ask)
+	m = updated.(model)
+	updated, _ = m.Update(doneMsg{err: context.Canceled})
+	if m = updated.(model); m.ask.pending != nil {
+		t.Fatal("dead turn left its card up")
 	}
 }
 

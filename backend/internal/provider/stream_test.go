@@ -1,4 +1,4 @@
-package llm
+package provider
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"testing"
 )
 
-/* Runs Stream against a test SSE body. */
 func streamFrom(t *testing.T, body string) (Message, []string, error) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -18,7 +17,7 @@ func streamFrom(t *testing.T, body string) (Message, []string, error) {
 	t.Cleanup(srv.Close)
 	prof := Profile{Provider: Provider{Name: "fake", BaseURL: srv.URL}, Model: "m", MaxTokens: 100}
 	var tokens []string
-	msg, err := Stream(context.Background(), prof, []Message{{Role: "user", Content: "hi"}}, nil,
+	msg, err := (OpenAIDialect{}).Stream(context.Background(), prof, []Message{{Role: "user", Content: "hi"}}, nil, Options{},
 		func(s string, thinking bool) { tokens = append(tokens, s) })
 	return msg, tokens, err
 }
@@ -43,7 +42,6 @@ data: [DONE]
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	// Keep the legal spaceless data line.
 	if msg.Content != "Hello" {
 		t.Fatalf("content = %q, want Hello", msg.Content)
 	}
@@ -70,13 +68,11 @@ data: {"error":{"message":"rate limit exceeded"}}
 }
 
 func TestStreamRequiresFinishReason(t *testing.T) {
-	// Clean EOF without a finish reason is still incomplete.
 	_, _, err := streamFrom(t, `data: {"choices":[{"delta":{"content":"Hel"}}]}
 `)
 	if err == nil || !strings.Contains(err.Error(), "finish reason") {
 		t.Fatalf("EOF without finish_reason must error, got: %v", err)
 	}
-	// A plain JSON (non-SSE) 200 body has no data: lines at all.
 	_, _, err = streamFrom(t, `{"choices":[{"message":{"role":"assistant","content":"hi"}}]}`)
 	if err == nil {
 		t.Fatal("non-SSE body must not be treated as an empty success")
@@ -96,7 +92,6 @@ data: [DONE]
 }
 
 func TestStreamRejectsEmptyOutput(t *testing.T) {
-	// A reasoning-only reply cannot be replayed as an answer.
 	msg, tokens, err := streamFrom(t, `data: {"choices":[{"delta":{"reasoning_content":"hmm"}}]}
 
 data: {"choices":[{"delta":{},"finish_reason":"length"}]}
@@ -122,9 +117,7 @@ func TestStreamRejectsMalformedIndex(t *testing.T) {
 	}
 }
 
-/* Rejects incomplete tool calls. */
 func TestStreamRejectsHollowToolCalls(t *testing.T) {
-	// First fragment arrives at index 1: slot 0 is a fabricated shell.
 	_, _, err := streamFrom(t, `data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"c1","function":{"name":"t","arguments":"{}"}}]}}]}
 
 data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
@@ -135,7 +128,6 @@ data: [DONE]
 		t.Fatalf("sparse index must not yield hollow calls as success, got: %v", err)
 	}
 
-	// Fragments that never carry an id.
 	_, _, err = streamFrom(t, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"t","arguments":"{}"}}]}}]}
 
 data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
@@ -147,7 +139,6 @@ data: [DONE]
 	}
 }
 
-/* Skips empty SSE heartbeats. */
 func TestStreamSkipsEmptyDataHeartbeat(t *testing.T) {
 	msg, _, err := streamFrom(t, `data: {"choices":[{"delta":{"content":"hi"}}]}
 
@@ -167,7 +158,6 @@ data: [DONE]
 	}
 }
 
-/* Accepts a string error envelope. */
 func TestStreamSurfacesStringErrorFrame(t *testing.T) {
 	_, _, err := streamFrom(t, `data: {"error":"rate limited, slow down"}
 `)
@@ -176,7 +166,6 @@ func TestStreamSurfacesStringErrorFrame(t *testing.T) {
 	}
 }
 
-/* Keeps content that arrived before an error. */
 func TestStreamPreservesPartialContentOnError(t *testing.T) {
 	msg, tokens, err := streamFrom(t, `data: {"choices":[{"delta":{"content":"partial answer"}}]}
 
@@ -190,7 +179,6 @@ data: {"error":{"message":"upstream died"}}
 	}
 }
 
-/* Fills missing arguments for zero-argument tools. */
 func TestStreamNormalizesEmptyArguments(t *testing.T) {
 	msg, _, err := streamFrom(t, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"current_time"}}]}}]}
 

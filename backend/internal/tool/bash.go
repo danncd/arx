@@ -1,3 +1,5 @@
+//go:build unix
+
 package tool
 
 import (
@@ -5,10 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 )
@@ -18,7 +20,6 @@ const (
 	bashMaxTimeout = 120 * time.Second
 )
 
-// Tests shorten this wait.
 var bashDrainTimeout = 5 * time.Second
 
 var Bash = Tool{
@@ -29,6 +30,7 @@ var Bash = Tool{
 		`"command":{"type":"string","description":"Command for bash -c"},` +
 		`"timeout_secs":{"type":"integer","description":"Deadline in seconds, default 30, max 120"}},` +
 		`"required":["command"]}`),
+	Mutating: true,
 	Run: func(ctx context.Context, args json.RawMessage) (string, error) {
 		var a struct {
 			Command     string `json:"command"`
@@ -53,33 +55,24 @@ var Bash = Tool{
 		defer cancel()
 
 		buf := &capBuf{limit: maxToolBytes + 1}
-		reader, writer, err := os.Pipe()
-		if err != nil {
-			return "", err
-		}
-		defer reader.Close()
-		readDone := make(chan error, 1)
-		go func() {
-			_, err := io.Copy(buf, reader)
-			readDone <- err
-		}()
-
-		cmd := exec.Command("bash", "-c", a.Command)
-		cmd.Stdout, cmd.Stderr = writer, writer
+		cmd := exec.CommandContext(ctx, "bash", "-c", a.Command)
+		cmd.Stdout, cmd.Stderr = buf, buf
 		cmd.Env = scrubbedEnv()
-		runErr := runCommand(ctx, cmd)
-		writer.Close()
-		var readErr error
-		select {
-		case readErr = <-readDone:
-		case <-time.After(bashDrainTimeout):
-			// Stop waiting for a child that escaped the process group.
-			reader.Close()
-			<-readDone
+
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Cancel = func() error {
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		}
-		if runErr == nil && readErr != nil {
-			runErr = readErr
+		cmd.WaitDelay = bashDrainTimeout
+
+		runErr := cmd.Run()
+		if cmd.Process != nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		}
+		if errors.Is(runErr, exec.ErrWaitDelay) {
+			runErr = nil
+		}
+
 		out, truncated := clipUTF8(buf.b, maxToolBytes)
 		if !utf8.ValidString(out) {
 			return "", fmt.Errorf("output is not UTF-8 text")
@@ -98,7 +91,6 @@ var Bash = Tool{
 		}
 		var exit *exec.ExitError
 		if errors.As(runErr, &exit) {
-			// Keep output in the failed tool result.
 			return "", fmt.Errorf("exit %d\n%s", exit.ExitCode(), out)
 		}
 		if runErr != nil {
@@ -107,8 +99,6 @@ var Bash = Tool{
 		return out, nil
 	},
 }
-
-/* Keeps the first limit bytes without blocking the command. */
 
 type capBuf struct {
 	b     []byte
@@ -121,8 +111,6 @@ func (w *capBuf) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
-
-/* Child env with only the basics a command needs. */
 
 func scrubbedEnv() []string {
 	allowed := map[string]bool{

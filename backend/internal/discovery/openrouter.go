@@ -1,4 +1,4 @@
-package llm
+package discovery
 
 import (
 	"context"
@@ -10,11 +10,8 @@ import (
 
 var orModelsURL = "https://openrouter.ai/api/v1/models"
 
-/* OpenRouter fields used during discovery. */
-
 type orModel struct {
 	ID                  string   `json:"id"`
-	ContextLength       int      `json:"context_length"`
 	SupportedParameters []string `json:"supported_parameters"`
 	Architecture        struct {
 		Modality string `json:"modality"`
@@ -24,6 +21,12 @@ type orModel struct {
 	} `json:"top_provider"`
 }
 
+type orList struct {
+	Data []orModel `json:"data"`
+}
+
+var datedSnapshot = regexp.MustCompile(`-\d{4}-\d{2}-\d{2}$`)
+
 func contains(list []string, want string) bool {
 	for _, s := range list {
 		if s == want {
@@ -32,12 +35,6 @@ func contains(list []string, want string) bool {
 	}
 	return false
 }
-
-type orList struct {
-	Data []orModel `json:"data"`
-}
-
-/* Loads OpenRouter metadata by normalized model ID. */
 
 func fetchORCatalog(ctx context.Context) (map[string]orModel, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", orModelsURL, nil)
@@ -81,8 +78,6 @@ func fetchORCatalog(ctx context.Context) (map[string]orModel, error) {
 	}
 	return index, nil
 }
-
-var datedSnapshot = regexp.MustCompile(`-\d{4}-\d{2}-\d{2}$`)
 
 func normalizeModelID(id string) string {
 	if _, bare, ok := strings.Cut(id, "/"); ok {

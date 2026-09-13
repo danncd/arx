@@ -1,4 +1,4 @@
-package llm
+package provider
 
 import (
 	"context"
@@ -10,10 +10,7 @@ import (
 	"testing"
 )
 
-/* Rejects unusable chat replies. */
-
 func TestChatGuards(t *testing.T) {
-	// Check the request too.
 	t.Setenv("FAKE_KEY", "sk-test")
 	serve := func(body string) Profile {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -36,16 +33,14 @@ func TestChatGuards(t *testing.T) {
 		return Profile{Provider: Provider{Name: "fake", BaseURL: srv.URL + "/", KeyEnv: "FAKE_KEY"}, Model: "m", MaxTokens: 100}
 	}
 
-	// Basic reply.
 	prof := serve(`{"choices":[{"message":{"role":"assistant","content":"hi","reasoning_content":"thought"},"finish_reason":"stop"}]}`)
-	msg, err := Chat(context.Background(), prof, []Message{{Role: "user", Content: "x"}}, nil)
+	msg, err := (OpenAIDialect{}).Chat(context.Background(), prof, []Message{{Role: "user", Content: "x"}}, nil, Options{})
 	if err != nil || msg.Content != "hi" || msg.ReasoningContent != "thought" {
 		t.Fatalf("happy path: msg=%+v err=%v", msg, err)
 	}
 
-	// Fill wire omissions.
 	prof = serve(`{"choices":[{"message":{"content":"","tool_calls":[{"id":"c1","function":{"name":"current_time"}}]},"finish_reason":"tool_calls"}]}`)
-	msg, err = Chat(context.Background(), prof, nil, nil)
+	msg, err = (OpenAIDialect{}).Chat(context.Background(), prof, nil, nil, Options{})
 	if err != nil {
 		t.Fatalf("zero-arg tool call: %v", err)
 	}
@@ -53,83 +48,69 @@ func TestChatGuards(t *testing.T) {
 		t.Fatalf("reply not normalized: %+v", msg)
 	}
 
-	// Object error.
 	prof = serve(`{"error":{"message":"Insufficient Balance"}}`)
-	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "Insufficient Balance") {
+	if _, err := (OpenAIDialect{}).Chat(context.Background(), prof, nil, nil, Options{}); err == nil || !strings.Contains(err.Error(), "Insufficient Balance") {
 		t.Fatalf("error envelope lost: %v", err)
 	}
 
-	// No choices.
 	prof = serve(`{"choices":[]}`)
-	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "empty choices") {
+	if _, err := (OpenAIDialect{}).Chat(context.Background(), prof, nil, nil, Options{}); err == nil || !strings.Contains(err.Error(), "empty choices") {
 		t.Fatalf("empty choices: %v", err)
 	}
 
-	// String error.
 	prof = serve(`{"error":"rate limited, retry later"}`)
-	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "rate limited, retry later") {
+	if _, err := (OpenAIDialect{}).Chat(context.Background(), prof, nil, nil, Options{}); err == nil || !strings.Contains(err.Error(), "rate limited, retry later") {
 		t.Fatalf("string error envelope lost: %v", err)
 	}
 
-	// Truncated call.
 	prof = serve(`{"choices":[{"message":{"role":"assistant","content":"","tool_calls":[{"id":"c1","type":"function","function":{"name":"t","arguments":"{\"city\":\"San Fr"}}]},"finish_reason":"length"}]}`)
-	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "token limit") {
+	if _, err := (OpenAIDialect{}).Chat(context.Background(), prof, nil, nil, Options{}); err == nil || !strings.Contains(err.Error(), "token limit") {
 		t.Fatalf("truncated tool call must error, got: %v", err)
 	}
 
-	// Empty answer.
 	prof = serve(`{"choices":[{"message":{"role":"assistant","content":""},"finish_reason":"length"}]}`)
-	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "no output") {
+	if _, err := (OpenAIDialect{}).Chat(context.Background(), prof, nil, nil, Options{}); err == nil || !strings.Contains(err.Error(), "no output") {
 		t.Fatalf("empty reply must error, got: %v", err)
 	}
 
-	// Invalid arguments.
 	prof = serve(`{"choices":[{"message":{"tool_calls":[{"id":"c1","function":{"name":"current_time","arguments":"{"}}]},"finish_reason":"tool_calls"}]}`)
-	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "invalid JSON") {
+	if _, err := (OpenAIDialect{}).Chat(context.Background(), prof, nil, nil, Options{}); err == nil || !strings.Contains(err.Error(), "invalid JSON") {
 		t.Fatalf("invalid tool arguments must error, got: %v", err)
 	}
 
-	// Unsupported call type.
 	prof = serve(`{"choices":[{"message":{"tool_calls":[{"id":"c1","type":"custom","function":{"name":"current_time","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`)
-	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "unsupported tool call type") {
+	if _, err := (OpenAIDialect{}).Chat(context.Background(), prof, nil, nil, Options{}); err == nil || !strings.Contains(err.Error(), "unsupported tool call type") {
 		t.Fatalf("unsupported tool call type must error, got: %v", err)
 	}
 
-	// Call with a text finish.
 	prof = serve(`{"choices":[{"message":{"tool_calls":[{"id":"c1","type":"function","function":{"name":"current_time","arguments":"{}"}}]},"finish_reason":"stop"}]}`)
-	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "finish reason") {
+	if _, err := (OpenAIDialect{}).Chat(context.Background(), prof, nil, nil, Options{}); err == nil || !strings.Contains(err.Error(), "finish reason") {
 		t.Fatalf("mismatched tool call finish must error, got: %v", err)
 	}
 
-	// Tool finish without a call.
 	prof = serve(`{"choices":[{"message":{"content":"hi"},"finish_reason":"tool_calls"}]}`)
-	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "without carrying any") {
+	if _, err := (OpenAIDialect{}).Chat(context.Background(), prof, nil, nil, Options{}); err == nil || !strings.Contains(err.Error(), "without carrying any") {
 		t.Fatalf("missing tool calls must error, got: %v", err)
 	}
 
-	// Duplicate call ids.
 	prof = serve(`{"choices":[{"message":{"tool_calls":[
 		{"id":"c1","type":"function","function":{"name":"first","arguments":"{}"}},
 		{"id":"c1","type":"function","function":{"name":"second","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`)
-	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "duplicate tool call id") {
+	if _, err := (OpenAIDialect{}).Chat(context.Background(), prof, nil, nil, Options{}); err == nil || !strings.Contains(err.Error(), "duplicate tool call id") {
 		t.Fatalf("duplicate tool call ids must error, got: %v", err)
 	}
 
-	// Invalid UTF-8.
 	badUTF8 := `{"choices":[{"message":{"tool_calls":[{"id":"c1","function":{"name":"current_time","arguments":"{\"key\":\"` + string([]byte{0xff}) + `\"}"}}]},"finish_reason":"tool_calls"}]}`
 	prof = serve(badUTF8)
-	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "invalid UTF-8") {
+	if _, err := (OpenAIDialect{}).Chat(context.Background(), prof, nil, nil, Options{}); err == nil || !strings.Contains(err.Error(), "invalid UTF-8") {
 		t.Fatalf("invalid UTF-8 must error, got: %v", err)
 	}
 
-	// Wrong role.
 	prof = serve(`{"choices":[{"message":{"role":"system","content":"promoted"},"finish_reason":"stop"}]}`)
-	if _, err := Chat(context.Background(), prof, nil, nil); err == nil || !strings.Contains(err.Error(), "want assistant") {
+	if _, err := (OpenAIDialect{}).Chat(context.Background(), prof, nil, nil, Options{}); err == nil || !strings.Contains(err.Error(), "want assistant") {
 		t.Fatalf("wrong reply role must error, got: %v", err)
 	}
 }
-
-/* Keeps the HTTP status and provider error. */
 
 func TestChatSurfacesHTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -139,7 +120,7 @@ func TestChatSurfacesHTTPError(t *testing.T) {
 	t.Cleanup(srv.Close)
 	prof := Profile{Provider: Provider{Name: "fake", BaseURL: srv.URL}, Model: "m", MaxTokens: 100}
 
-	_, err := Chat(context.Background(), prof, nil, nil)
+	_, err := (OpenAIDialect{}).Chat(context.Background(), prof, nil, nil, Options{})
 	if err == nil || !strings.Contains(err.Error(), "401") || !strings.Contains(err.Error(), "invalid api key") {
 		t.Fatalf("want status and body in the error, got: %v", err)
 	}
@@ -152,19 +133,17 @@ func TestChatLimitsResponseSize(t *testing.T) {
 	t.Cleanup(srv.Close)
 	prof := Profile{Provider: Provider{Name: "fake", BaseURL: srv.URL}, Model: "m"}
 
-	_, err := Chat(context.Background(), prof, nil, nil)
+	_, err := (OpenAIDialect{}).Chat(context.Background(), prof, nil, nil, Options{})
 	if err == nil || !strings.Contains(err.Error(), "exceeded") {
 		t.Fatalf("oversized response error = %v", err)
 	}
 }
 
-/* Uses each provider's token field. */
-
 func TestBuildRequestTokenParam(t *testing.T) {
 	msgs := []Message{{Role: "user", Content: "hi"}}
 
 	classic, _ := GetProvider("deepseek")
-	b, err := json.Marshal(buildRequest(Profile{Provider: classic, Model: "m", MaxTokens: 8192}, msgs, nil, false))
+	b, err := json.Marshal(classic.Dialect.(OpenAIDialect).buildRequest(Profile{Provider: classic, Model: "m", MaxTokens: 8192}, msgs, nil, Options{}, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,14 +152,13 @@ func TestBuildRequestTokenParam(t *testing.T) {
 	}
 
 	modern, _ := GetProvider("openai")
-	b, err = json.Marshal(buildRequest(Profile{Provider: modern, Model: "m", MaxTokens: 8192}, msgs, nil, true))
+	b, err = json.Marshal(modern.Dialect.(OpenAIDialect).buildRequest(Profile{Provider: modern, Model: "m", MaxTokens: 8192}, msgs, nil, Options{}, true))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(b), `"max_completion_tokens":8192`) {
 		t.Fatalf("openai request missing max_completion_tokens: %s", b)
 	}
-	// Match the full old field name.
 	if strings.Contains(string(b), `"max_tokens"`) {
 		t.Fatalf("openai request still carries classic max_tokens: %s", b)
 	}
@@ -188,8 +166,6 @@ func TestBuildRequestTokenParam(t *testing.T) {
 		t.Fatalf("stream flag lost its wire tag again: %s", b)
 	}
 }
-
-/* Keeps message field names stable. */
 
 func TestMessageMarshalsToWireNames(t *testing.T) {
 	m := Message{
@@ -220,11 +196,9 @@ func TestMessageMarshalsToWireNames(t *testing.T) {
 	}
 }
 
-/* Keeps request field names stable. */
-
 func TestRequestMarshalsToWireNames(t *testing.T) {
 	classic, _ := GetProvider("deepseek")
-	req := buildRequest(
+	req := classic.Dialect.(OpenAIDialect).buildRequest(
 		Profile{Provider: classic, Model: "m", MaxTokens: 100},
 		[]Message{{Role: "user", Content: "hi"}},
 		[]ToolSpec{{Type: "function", Function: ToolFunction{
@@ -232,6 +206,7 @@ func TestRequestMarshalsToWireNames(t *testing.T) {
 			Description: "d",
 			Parameters:  json.RawMessage(`{"type":"object"}`),
 		}}},
+		Options{},
 		false,
 	)
 	b, err := json.Marshal(req)

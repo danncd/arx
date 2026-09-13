@@ -9,21 +9,15 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-	"time"
+	"unicode"
 
 	"github.com/charmbracelet/x/term"
 
 	"arx/internal/agent"
 	"arx/internal/config"
-	"arx/internal/llm"
+	"arx/internal/discovery"
 	"arx/internal/tool"
 )
-
-/* Every conversation starts here. */
-
-const systemPrompt = "You are arx, a concise assistant."
-
-/* Reports whether a file is attached to a terminal. */
 
 func isTerminal(file *os.File) bool {
 	return term.IsTerminal(file.Fd())
@@ -32,60 +26,35 @@ func isTerminal(file *os.File) bool {
 func terminalText(s string) string {
 	var b strings.Builder
 	for _, r := range s {
-		if r == '\n' || r == '\t' || r >= ' ' && (r < 0x7f || r > 0x9f) {
+		if r == '\n' || r == '\t' {
+			b.WriteRune(r)
+			continue
+		}
+		if r >= ' ' && (r < 0x7f || r > 0x9f) && !unicode.Is(unicode.Cf, r) {
 			b.WriteRune(r)
 		}
 	}
 	return b.String()
 }
 
-/* Streams plain-mode output. */
-
-type terminalSink struct {
-	color  bool // escape codes stay out of pipes and files
-	answer strings.Builder
-}
-
-func (t *terminalSink) Token(s string, thinking bool) {
+func terminalLine(s string) string {
 	s = terminalText(s)
-	if !t.color {
-		if !thinking {
-			t.answer.WriteString(s)
-		}
-		return
-	}
-	if thinking && t.color {
-		fmt.Print("\033[90m" + s + "\033[0m")
-	} else {
-		fmt.Print(s)
-	}
+	s = strings.ReplaceAll(s, "\n", " ")
+	return strings.ReplaceAll(s, "\t", " ")
 }
 
-func (t *terminalSink) ToolResult(name, out string, _ time.Duration, _ bool) {
-	if !t.color {
-		t.answer.Reset()
-		return
-	}
-	fmt.Println("  [" + terminalLine(name) + "] → " + terminalText(out))
+func registerTools() {
+	tool.Register(tool.Bash)
 }
-
-func (t *terminalSink) finish(success bool) {
-	if !t.color {
-		if success {
-			fmt.Print(t.answer.String())
-		}
-		t.answer.Reset()
-	}
-}
-
-/* Starts the terminal UI or the plain pipe loop. */
 
 func Run() error {
+	judgeEnv := os.Getenv("ARX_JUDGE_MODEL")
+
 	if err := config.LoadDotEnv(".env"); err != nil {
 		fmt.Fprintln(os.Stderr, "arx: .env:", terminalText(err.Error()))
 	}
 
-	models, err := llm.LoadModels(context.Background())
+	models, err := discovery.LoadModels(context.Background())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "arx: some providers failed:", terminalText(err.Error()))
 	}
@@ -93,18 +62,29 @@ func Run() error {
 		return errors.New("no models found: set DEEPSEEK_API_KEY or OPENAI_API_KEY")
 	}
 
-	prof, err := resolveProfile(defaultSpec(models), models)
+	prof, err := discovery.ResolveProfile(discovery.DefaultSpec(models), models)
 	if err != nil {
 		return err
 	}
 	registerTools()
-	ctrl := agent.New(prof, systemPrompt)
+	ctrl := agent.New(prof, buildSystemPrompt())
 
-	// Pipes keep the plain loop for scripts.
-	if isTerminal(os.Stdin) && isTerminal(os.Stdout) {
-		return runTUI(ctrl, prof)
+	judgeProf := prof
+	if judgeEnv != "" {
+		jp, err := discovery.ResolveProfile(judgeEnv, models)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "arx: ARX_JUDGE_MODEL:", terminalText(err.Error()), "- using the main model")
+		} else {
+			judgeProf = jp
+		}
 	}
-	// A piped stdout wants bare answers: no banner, prompt, or color.
+	judge := agent.NewJudge(judgeProf)
+
+	if isTerminal(os.Stdin) && isTerminal(os.Stdout) {
+		return runTUI(ctrl, prof, judge)
+	}
+	ctrl.SetGate(agent.NewGate(denyApprover{}, judge))
+
 	tty := isTerminal(os.Stdout)
 	if tty {
 		fmt.Printf("arx - %s/%s · ctrl-d to leave\n", terminalLine(prof.Provider.Name), terminalLine(prof.Model))
@@ -112,7 +92,7 @@ func Run() error {
 
 	sink := &terminalSink{color: tty}
 	in := bufio.NewScanner(os.Stdin)
-	in.Buffer(make([]byte, 0, 64*1024), 4*1024*1024) // large pastes stay valid input
+	in.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for {
 		if tty {
 			fmt.Print("> ")
@@ -137,58 +117,8 @@ func Run() error {
 		case err != nil:
 			fmt.Fprintln(os.Stderr, "arx:", terminalText(err.Error()))
 		default:
-			fmt.Println() // close the streamed line
+			fmt.Println()
 		}
 	}
-	// Scan() false is EOF only when Err() is nil.
 	return in.Err()
-}
-
-func terminalLine(s string) string {
-	s = terminalText(s)
-	s = strings.ReplaceAll(s, "\n", " ")
-	return strings.ReplaceAll(s, "\t", " ")
-}
-
-func registerTools() {
-	tool.Register(tool.ReadFile)
-	tool.Register(tool.Fetch)
-	tool.Register(tool.Bash)
-}
-
-/* Adds catalog capabilities to a parsed profile. */
-
-func resolveProfile(spec string, models []llm.ModelInfo) (llm.Profile, error) {
-	prof, err := llm.Parse(spec)
-	if err != nil {
-		return llm.Profile{}, err
-	}
-	for _, m := range models {
-		if m.Provider == prof.Provider.Name && m.Model == prof.Model {
-			prof.Tools = m.Tools
-			prof.ToolsKnown = m.ToolsKnown
-			// The catalog's completion ceiling beats the parse default.
-			if m.MaxOutput > 0 && m.MaxOutput < prof.MaxTokens {
-				prof.MaxTokens = m.MaxOutput
-			}
-			break
-		}
-	}
-	return prof, nil
-}
-
-/* Picks ARX_MODEL, DeepSeek, or the first discovered model. */
-
-func defaultSpec(models []llm.ModelInfo) string {
-	if spec := os.Getenv("ARX_MODEL"); spec != "" {
-		return spec
-	}
-	if p, err := llm.GetProvider("deepseek"); err == nil && p.Key() != "" {
-		for _, m := range models {
-			if m.Spec == "deepseek/deepseek-v4-flash" {
-				return m.Spec
-			}
-		}
-	}
-	return models[0].Spec // Run checks that the catalog is not empty
 }
