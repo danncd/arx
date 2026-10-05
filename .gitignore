@@ -1,4 +1,4 @@
-desktop/node_modules/
+desktop/node_modules
 desktop/.build/
 desktop/test-results/
 dist/
