@@ -1,0 +1,135 @@
+.local-browser-machine {
+    margin-bottom: 16px;
+}
+
+.local-browser-machine i {
+    width: 14px;
+    height: 14px;
+}
+
+.local-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 34px;
+    padding: 0 10px;
+    border: 0.5px solid #dedede;
+    border-radius: 8px;
+    color: #929292;
+}
+
+.local-search i {
+    width: 15px;
+    height: 15px;
+}
+
+.local-search input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    font-size: 12px;
+    color: var(--text);
+    box-shadow: none;
+}
+
+.local-browser-filters {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--muted);
+    margin: 12px 0 5px;
+    font-size: 11px;
+}
+
+.local-browser-filters label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.local-browser-filters input {
+    margin: 0;
+    accent-color: var(--jade);
+}
+
+.local-variant-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.local-variant-row .local-fit {
+    margin-top: 0;
+}
+
+.local-variant-row .select-control > button {
+    height: 30px;
+    min-height: 30px;
+    padding: 0 8px;
+    font-size: 11px;
+}
+
+.local-variant-row .select-control > button .select-option-title {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.local-variant-row .select-control > button > svg {
+    flex: none;
+}
+
+.local-variant-row .select-options {
+    height: 200px;
+    max-height: 40dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.local-browser-filters label,
+.local-browser-filters input,
+.local-fit {
+    cursor: pointer;
+}
+
+.local-browser-filters {
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0 0;
+}
+
+.model-filter-selects {
+    display: flex;
+    gap: 6px;
+    margin-left: auto;
+}
+
+.model-filter-selects .select-control > button {
+    min-height: 28px;
+    height: 28px;
+    padding: 0 8px;
+    font-size: 10.5px;
+}
+
+.model-filter-selects .select-option-title {
+    white-space: nowrap;
+}
+
+.model-filter-selects .select-options {
+    min-width: 150px;
+}
+
+.model-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 0 2px;
+    color: var(--faint);
+    font-size: 11px;
+}

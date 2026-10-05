@@ -1,0 +1,34 @@
+.image-preview-dialog {
+    width: fit-content;
+    max-width: calc(100vw - 48px);
+    max-height: 76dvh;
+    padding: 0;
+    border: 0;
+    border-radius: 44px;
+    corner-shape: squircle;
+    overflow: hidden;
+    background: transparent;
+    color: var(--text);
+}
+
+.image-preview-dialog::backdrop {
+    background: #0006;
+}
+
+.image-preview-close {
+    position: absolute;
+    z-index: 1;
+    top: 12px;
+    right: 12px;
+}
+
+.image-preview-full {
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: min(720px, calc(100vw - 48px));
+    max-height: min(630px, 76dvh);
+    border-radius: inherit;
+    corner-shape: squircle;
+    object-fit: contain;
+}

@@ -1,0 +1,216 @@
+.local-button {
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 10px;
+    background: var(--canvas);
+    border: 0.5px solid var(--control-line);
+    border-radius: 8px;
+    font-size: 11.5px;
+    color: var(--subtle-text);
+    white-space: nowrap;
+    flex: none;
+}
+
+.local-button:hover:not(:disabled) {
+    background: var(--sidebar);
+}
+
+.local-button i {
+    width: 13px;
+    height: 13px;
+}
+
+.local-machine {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 11px;
+    margin: 0 0 12px;
+}
+
+.local-idle-setting {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 20px;
+    color: var(--subtle-text);
+    font-size: 12px;
+}
+
+.local-idle-setting .select-control {
+    width: 125px;
+}
+
+.local-machine span {
+    color: #aaa;
+}
+
+.local-library-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12px;
+    font-weight: 500;
+    margin-bottom: 0;
+}
+
+.local-empty {
+    padding: 20px 0;
+    color: var(--faint);
+    font-size: 12px;
+}
+
+.local-library-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.local-import {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+}
+
+.local-import i {
+    width: 14px;
+    height: 14px;
+}
+
+.local-model-row {
+    padding: 18px 0;
+    border-bottom: 0.5px solid var(--line);
+}
+
+.local-model-row:last-child {
+    border-bottom: 0;
+}
+
+.local-model-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.local-model-info {
+    min-width: 0;
+}
+
+.local-model-title {
+    font-size: 12.5px;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+}
+
+.local-model-meta {
+    color: var(--faint);
+    font-size: 11px;
+    margin-top: 5px;
+    overflow-wrap: anywhere;
+}
+
+.local-fit {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    margin-top: 9px;
+    padding: 0;
+    color: var(--jade);
+}
+
+.local-fit i {
+    width: 12px;
+    height: 12px;
+}
+
+.local-fit.caution {
+    color: var(--warning);
+}
+
+.local-fit.unsuitable {
+    color: var(--danger);
+}
+
+.local-detail {
+    margin: 8px 0 0;
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.5;
+}
+
+.local-model-actions {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: none;
+}
+
+.local-model-actions .primary-button {
+    height: 30px;
+    font-size: 11.5px;
+    border-radius: 8px;
+}
+
+.local-progress {
+    margin-top: 13px;
+}
+
+.local-progress-label {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 7px;
+    font-variant-numeric: tabular-nums;
+}
+
+.local-progress-track {
+    height: 4px;
+    border-radius: 99px;
+    background: #edf0ed;
+    overflow: hidden;
+}
+
+.local-progress-fill {
+    height: 100%;
+    background: var(--jade);
+    border-radius: inherit;
+    transition: width 220ms ease;
+}
+
+.local-error {
+    color: var(--danger);
+    font-size: 12px;
+    line-height: 1.5;
+    margin: 12px 0;
+}
+
+.local-progress-fill.indeterminate {
+    width: 35%;
+    animation: local-progress 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes local-progress {
+    from {
+        transform: translateX(0);
+    }
+    to {
+        transform: translateX(180%);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .local-progress-fill.indeterminate {
+        animation: none;
+    }
+}

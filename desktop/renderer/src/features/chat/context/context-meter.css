@@ -1,0 +1,109 @@
+.context-meter {
+    width: 26px;
+    height: 26px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: none;
+    border-radius: 10px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+}
+.context-meter:hover,
+.context-meter[aria-expanded="true"] {
+    background: var(--hover);
+}
+.context-panel {
+    position: fixed;
+    z-index: 60;
+    width: 320px;
+    max-width: calc(100vw - 16px);
+    overflow-y: auto;
+    user-select: none;
+}
+.context-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 9px 0;
+}
+.context-reading {
+    font-size: 14px;
+    font-weight: 500;
+    color: #303030;
+}
+.context-counts {
+    white-space: nowrap;
+    color: #8e8e93;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+.context-bar {
+    display: flex;
+    height: 6px;
+    margin: 10px 9px 12px;
+    border-radius: 3px;
+    overflow: hidden;
+    background: var(--hover);
+}
+.context-segment {
+    height: 100%;
+}
+.context-segment.part-messages {
+    background: var(--jade);
+}
+
+.context-legend {
+    display: grid;
+    gap: 2px;
+    padding-bottom: 4px;
+}
+.context-row {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-height: 30px;
+    padding: 0 9px;
+    border-radius: 8px;
+    font-size: 13px;
+}
+.context-row:hover {
+    background: var(--hover);
+}
+.context-swatch {
+    width: 10px;
+    height: 10px;
+    flex: none;
+    border-radius: 3px;
+}
+.context-swatch.part-messages {
+    background: var(--jade);
+}
+.context-what {
+    color: #262626;
+}
+.context-detail {
+    color: #8e8e93;
+    font-size: 10.5px;
+}
+.context-value {
+    margin-left: auto;
+    color: #8e8e93;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.context-segment.part-system,
+.context-swatch.part-system {
+    background: #9a9da2;
+}
+.context-segment.part-tools,
+.context-swatch.part-tools {
+    background: #8cabc1;
+}
+.context-segment.part-summary,
+.context-swatch.part-summary {
+    background: #c5af80;
+}

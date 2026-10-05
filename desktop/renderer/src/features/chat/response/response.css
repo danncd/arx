@@ -1,0 +1,227 @@
+.thinking {
+    margin-block: 0;
+    padding-block: 3px;
+}
+.thinking-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--muted);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+}
+.thinking-header:hover {
+    color: var(--text);
+}
+
+.thinking-header {
+    max-width: 100%;
+}
+
+.thinking-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+}
+
+.thinking-preview {
+    flex: 1 1 0%;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--muted);
+}
+
+.thinking-preview::before {
+    content: "·";
+    margin-right: 6px;
+}
+.thinking-chevron {
+    display: flex;
+    transform: rotate(-90deg);
+    transition: transform var(--expand-duration) var(--expand-easing);
+}
+.thinking-chevron.open {
+    transform: rotate(0);
+}
+.thinking-reveal {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    visibility: hidden;
+    transition:
+        grid-template-rows var(--expand-duration) var(--expand-easing),
+        opacity var(--expand-duration) var(--expand-easing),
+        visibility 0s var(--expand-duration);
+}
+.thinking-reveal.expanded {
+    grid-template-rows: 1fr;
+    opacity: 1;
+    visibility: visible;
+    transition:
+        grid-template-rows var(--expand-duration) var(--expand-easing),
+        opacity var(--expand-duration) var(--expand-easing),
+        visibility 0s;
+}
+.thinking-clip {
+    min-height: 0;
+    overflow: hidden;
+}
+.thinking-body {
+    margin-top: 8px;
+    padding-left: 14px;
+    border-left: 2px solid var(--line);
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--muted);
+    overflow-wrap: break-word;
+}
+.thinking-body .markdown {
+    font-size: inherit;
+    line-height: inherit;
+}
+.thinking-body .markdown p {
+    white-space: pre-wrap;
+}
+
+.reply-failure {
+    padding: 9px 12px;
+    background: var(--danger-wash);
+    border: 0.5px solid rgba(164, 62, 53, 0.16);
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--danger);
+}
+.reply-failure p {
+    margin: 0;
+}
+.reply-failure small {
+    display: block;
+    margin-top: 5px;
+    overflow-wrap: anywhere;
+}
+.working-line {
+    min-height: 20px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: -18px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--muted);
+}
+.working-line.done {
+    visibility: hidden;
+}
+.working-glyph {
+    display: inline-flex;
+    color: var(--jade);
+    font-size: 13px;
+    line-height: 1;
+    animation: working-spin 1.6s linear infinite;
+}
+.working-time {
+    font-variant-numeric: tabular-nums;
+    color: var(--faint);
+}
+.shimmer-text {
+    background: linear-gradient(100deg, var(--muted) 42%, #2ea77a 50%, var(--muted) 58%);
+    background-size: 250% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: shimmer-sweep 2.4s linear infinite;
+}
+.live-dots {
+    display: inline-flex;
+}
+.live-dots span {
+    opacity: 0.25;
+    animation: dot-cascade 1.2s ease-in-out infinite;
+}
+.live-dots span:nth-child(2) {
+    animation-delay: 0.15s;
+}
+.live-dots span:nth-child(3) {
+    animation-delay: 0.3s;
+}
+.working-line.done .working-glyph,
+.working-line.done .shimmer-text,
+.working-line.done .live-dots span {
+    animation: none;
+}
+.jump-button {
+    position: absolute;
+    bottom: 12px;
+    right: max(16px, calc((100% - var(--chat-width)) / 2 + 16px));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: 0.5px solid #dfdfe4;
+    border-radius: 50%;
+    background: var(--sidebar);
+    box-shadow: var(--pill-shadow);
+    color: var(--text);
+    z-index: 5;
+    animation: chat-rise-in 0.15s ease;
+}
+@keyframes chat-fade-in {
+    from {
+        opacity: 0;
+    }
+}
+@keyframes chat-rise-in {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+}
+@keyframes working-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+@keyframes shimmer-sweep {
+    from {
+        background-position: 120% 0;
+    }
+    to {
+        background-position: -130% 0;
+    }
+}
+@keyframes dot-cascade {
+    40% {
+        opacity: 1;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .shimmer-text {
+        background: none;
+        color: var(--muted);
+        animation: none;
+    }
+    .live-dots span {
+        opacity: 1;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .thinking-reveal,
+    .thinking-reveal.expanded {
+        transition: none;
+    }
+}
+
+.turn-stop-status {
+    color: var(--danger);
+}

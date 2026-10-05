@@ -1,0 +1,50 @@
+.markdown pre .hljs-keyword,
+.markdown pre .hljs-selector-tag,
+.markdown pre .hljs-meta .hljs-keyword {
+    color: #9250a3;
+}
+.markdown pre .hljs-string,
+.markdown pre .hljs-regexp,
+.markdown pre .hljs-meta .hljs-string {
+    color: #9a4934;
+}
+.markdown pre .hljs-number,
+.markdown pre .hljs-literal {
+    color: #236e68;
+}
+.markdown pre .hljs-title,
+.markdown pre .hljs-section {
+    color: #316baf;
+}
+.markdown pre .hljs-built_in,
+.markdown pre .hljs-type,
+.markdown pre .hljs-title.class_ {
+    color: #867019;
+}
+.markdown pre .hljs-comment,
+.markdown pre .hljs-quote {
+    color: #70806d;
+}
+.markdown pre .hljs-attr,
+.markdown pre .hljs-attribute,
+.markdown pre .hljs-property,
+.markdown pre .hljs-selector-class,
+.markdown pre .hljs-selector-id {
+    color: #366b93;
+}
+.markdown pre .hljs-tag,
+.markdown pre .hljs-name,
+.markdown pre .hljs-variable,
+.markdown pre .hljs-template-variable,
+.markdown pre .hljs-symbol,
+.markdown pre .hljs-bullet,
+.markdown pre .hljs-link,
+.markdown pre .hljs-meta {
+    color: #875936;
+}
+.markdown pre .hljs-emphasis {
+    font-style: italic;
+}
+.markdown pre .hljs-strong {
+    font-weight: 600;
+}

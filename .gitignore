@@ -1,1 +1,7 @@
+desktop/node_modules/
+desktop/.build/
+desktop/test-results/
+dist/
 .env
+.DS_Store
+__pycache__/

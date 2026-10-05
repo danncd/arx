@@ -1,0 +1,128 @@
+.network-content {
+    padding: 0 0 16px;
+}
+.network-hint,
+.network-status {
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.6;
+}
+.network-hint {
+    margin: 0 0 16px;
+}
+.network-status {
+    margin: 24px 0;
+    max-width: 400px;
+}
+.network-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+.network-content button {
+    cursor: pointer;
+}
+.network-content button:disabled {
+    cursor: default;
+}
+.network-server {
+    padding: 20px 0 16px;
+}
+.network-server + .network-server {
+    border-top: 0.5px solid var(--line);
+}
+.network-server-top {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+.network-server-top > svg {
+    color: var(--muted);
+    flex: none;
+}
+.network-server-name {
+    flex: 1;
+    min-width: 0;
+}
+.network-server-name strong {
+    font-size: 12.5px;
+    font-weight: 500;
+}
+.network-server-name > span {
+    display: block;
+    color: var(--muted);
+    font-size: 11px;
+    margin-top: 4px;
+    overflow-wrap: anywhere;
+}
+.network-models {
+    margin-top: 20px;
+    font-size: 12px;
+}
+.network-models > span {
+    font-size: 11px;
+    color: var(--muted);
+}
+.network-models > div {
+    display: flex;
+    justify-content: space-between;
+    padding-top: 13px;
+    gap: 12px;
+}
+.network-models small {
+    color: var(--muted);
+    font-size: 10.5px;
+}
+.network-form {
+    margin: 20px 0;
+    display: grid;
+    gap: 14px;
+}
+.network-form label {
+    font-size: 11.5px;
+    display: grid;
+    gap: 7px;
+}
+.network-form label > span {
+    color: var(--faint);
+}
+.network-content input {
+    width: 100%;
+    min-width: 0;
+    height: 32px;
+    border: 0.5px solid #dadada;
+    border-radius: 8px;
+    corner-shape: squircle;
+    background: white;
+    padding: 0 10px;
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
+    outline: none;
+}
+.network-spinner {
+    animation: network-spin 1s linear infinite;
+}
+@keyframes network-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+.network-actions {
+    flex-wrap: wrap;
+}
+@media (max-width: 600px) {
+    .network-server-top {
+        flex-wrap: wrap;
+    }
+    .network-models > div {
+        flex-direction: column;
+        gap: 4px;
+    }
+    .network-server-name {
+        flex-basis: calc(100% - 30px);
+    }
+    .network-server-top > .connection-status {
+        margin-left: 29px;
+    }
+}

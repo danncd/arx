@@ -1,0 +1,23 @@
+.icon-pill {
+    width: 37px;
+    height: 37px;
+    display: grid;
+    place-items: center;
+    flex: none;
+    padding: 3px 5px;
+    border: 0.5px solid var(--pill-line);
+    border-radius: 999px;
+    corner-shape: round;
+    background: var(--sidebar);
+    box-shadow: var(--pill-shadow);
+    color: var(--subtle-text);
+    cursor: pointer;
+}
+.icon-pill:hover {
+    background: var(--sidebar);
+    color: var(--text);
+}
+.icon-pill svg {
+    width: 15px;
+    height: 15px;
+}

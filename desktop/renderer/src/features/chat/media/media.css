@@ -1,0 +1,41 @@
+.generated-media {
+    margin: 14px 0;
+}
+.generated-video {
+    position: relative;
+    max-width: 480px;
+}
+.generated-video video {
+    display: block;
+    width: 100%;
+    border-radius: 12px;
+}
+.generated-video-play {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    corner-shape: round;
+    display: grid;
+    place-items: center;
+    background: #ffffffdf;
+    color: #333;
+    box-shadow: 0 2px 10px #0001;
+}
+.generated-caption {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    max-width: 480px;
+    margin-top: 9px;
+    font-size: 11px;
+    color: var(--faint);
+}
+.generated-caption button {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}

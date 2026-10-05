@@ -1,0 +1,48 @@
+.speech-result {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #fcfcfc;
+    overflow: hidden;
+}
+.speech-player {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 15px 14px;
+}
+.speech-play {
+    width: 34px;
+    height: 34px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--sidebar);
+    color: var(--text);
+    cursor: pointer;
+}
+.speech-player input {
+    flex: 1;
+    min-width: 30px;
+    height: 3px;
+    accent-color: #588167;
+    cursor: pointer;
+}
+.speech-time {
+    font-size: 11px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.speech-download {
+    display: grid;
+    place-items: center;
+    color: var(--muted);
+}
+.speech-caption {
+    display: block;
+    padding: 0 14px 12px;
+    font-size: 10px;
+    color: var(--faint);
+}

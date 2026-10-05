@@ -1,0 +1,67 @@
+.notifications {
+    position: fixed;
+    top: 9px;
+    right: 14px;
+    width: min(360px, calc(100vw - 32px));
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 100;
+    pointer-events: none;
+}
+.notification {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr) 28px;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 12px 12px 10px;
+    --notification-accent: var(--danger);
+    border: 0.5px solid var(--notification-accent);
+    border-radius: var(--menu-radius);
+    background: color-mix(in srgb, var(--notification-accent) 7%, var(--canvas));
+    color: var(--text);
+    box-shadow: var(--pill-shadow);
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+    pointer-events: auto;
+    animation: notification-enter 160ms ease-out;
+}
+.notification-icon {
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 28px;
+    color: var(--notification-accent);
+}
+.notification-message {
+    min-width: 0;
+}
+.notification[data-kind="warning"] {
+    --notification-accent: var(--warning);
+}
+.notification[data-kind="success"] {
+    --notification-accent: var(--jade);
+}
+.notification[data-kind="info"] {
+    --notification-accent: var(--info);
+}
+.notification .notification-close {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--sidebar);
+}
+.notification .notification-close:hover {
+    background: var(--sidebar);
+}
+@keyframes notification-enter {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}

@@ -1,0 +1,102 @@
+.image-attachments {
+    display: flex;
+    flex-wrap: nowrap;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    gap: 10px;
+    padding: 2px 0 12px;
+}
+
+.image-attachment {
+    position: relative;
+    flex: none;
+    width: 116px;
+    height: 92px;
+    border: 0;
+    border-radius: 16px;
+    corner-shape: squircle;
+}
+
+.image-attachment img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: inherit;
+}
+
+.image-placeholder {
+    display: flex;
+    height: 100%;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    padding: 8px;
+    font-size: 11px;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+}
+
+.remove-attachment.icon-pill {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+}
+
+.remove-attachment.icon-pill svg {
+    width: 12px;
+    height: 12px;
+}
+
+.attach-button {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border: 0;
+    border-radius: 14px;
+    corner-shape: squircle;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+}
+
+.attach-button:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--hover);
+}
+
+.attach-button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.message.user > .image-attachments {
+    padding: 0;
+    justify-content: flex-start;
+}
+
+.message.user .image-attachment {
+    width: 200px;
+    height: 156px;
+    border-radius: 20px;
+}
+
+.attachment-preview-button {
+    display: block;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: inherit;
+    corner-shape: squircle;
+    overflow: hidden;
+    background: transparent;
+    cursor: zoom-in;
+}

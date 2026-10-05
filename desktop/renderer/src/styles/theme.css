@@ -1,0 +1,30 @@
+:root {
+    color-scheme: light;
+    --expand-duration: 220ms;
+    --expand-easing: ease;
+    --canvas: #ffffff;
+    --sidebar: #f7f7f7;
+    --hover: #ebebeb;
+    --selected: var(--hover);
+    --line: #e6e6e6;
+    --control-line: #dadada;
+    --pill-line: #dfdfe4;
+    --menu: #fbfbfb;
+    --text: #262626;
+    --subtle-text: #555555;
+    --muted: #777777;
+    --faint: #929292;
+    --jade: #11623f;
+    --jade-hover: #1a7f56;
+    --jade-wash: rgba(17, 98, 63, 0.07);
+    --danger: #a43e35;
+    --danger-wash: #fbf4f2;
+    --warning: #926c32;
+    --info: #59738b;
+    --row-radius: 11px;
+    --menu-radius: 12px;
+    --top-row-height: 54px;
+    --chat-width: 792px;
+    --pill-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+}

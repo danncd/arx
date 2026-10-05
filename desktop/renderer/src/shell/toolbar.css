@@ -1,0 +1,105 @@
+.window-toolbar {
+    position: absolute;
+    z-index: 20;
+    inset: 0 0 auto;
+    height: 54px;
+    min-width: 0;
+    background: transparent;
+    user-select: none;
+}
+.header-controls {
+    position: absolute;
+    top: 9px;
+    display: flex;
+    align-items: center;
+    pointer-events: none;
+    transition:
+        gap 0.2s ease,
+        left 0.2s ease;
+}
+.sidebar-control {
+    position: relative;
+    width: 37px;
+    height: 37px;
+    padding: 3px 5px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 999px;
+    color: var(--subtle-text);
+    background: transparent;
+    box-shadow: none;
+    pointer-events: auto;
+    transition: width 0.2s ease;
+}
+.sidebar-control svg {
+    position: relative;
+    z-index: 1;
+    width: 15px;
+    height: 15px;
+}
+.sidebar-control::before,
+.sidebar-control::after {
+    content: "";
+    position: absolute;
+    transition:
+        opacity 0.14s ease,
+        background 0.14s ease;
+}
+.sidebar-control::before {
+    inset: 3.5px;
+    border-radius: 9px;
+    background: transparent;
+    opacity: 1;
+}
+.sidebar-control::after {
+    inset: 0;
+    border: 0.5px solid var(--pill-line);
+    border-radius: 999px;
+    background: var(--sidebar);
+    box-shadow: var(--pill-shadow);
+    opacity: 0;
+}
+.sidebar-control:hover {
+    color: var(--text);
+}
+
+.sidebar-control:hover::before {
+    background: var(--hover);
+}
+.sidebar-control.is-pill::before {
+    opacity: 0;
+}
+.sidebar-control.is-pill::after {
+    opacity: 1;
+}
+.sidebar-control.is-pill:hover::after {
+    background: var(--sidebar);
+}
+.header-chat-action {
+    position: absolute;
+    top: 9px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    min-width: 0;
+    right: 14px;
+    transition: left 0.2s ease;
+}
+.header-chat-action.dragging {
+    transition: none;
+}
+.sidebar-control:disabled,
+.header-action-pill:disabled {
+    opacity: 0.38;
+    cursor: default;
+}
+.chat-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--muted);
+    font-size: 13px;
+}

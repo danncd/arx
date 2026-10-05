@@ -1,0 +1,55 @@
+.session-usage {
+    position: relative;
+    flex: none;
+    margin-left: auto;
+}
+.session-usage-trigger {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 30px;
+    padding: 5px 7px;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: #777;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+}
+.session-usage-trigger:hover,
+.session-usage-trigger[aria-expanded="true"] {
+    background: var(--hover);
+    color: var(--text);
+}
+.session-usage-panel {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    width: 220px;
+    max-width: calc(100vw - 28px);
+    color: var(--text);
+}
+.session-usage-heading {
+    padding: 7px 9px 9px;
+    font-size: 13px;
+    font-weight: 500;
+}
+.session-usage-panel dl {
+    margin: 0;
+    padding-bottom: 3px;
+}
+.session-usage-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-height: 29px;
+    padding: 0 9px;
+    font-size: 12px;
+}
+.session-usage-row dd {
+    margin: 0;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+}

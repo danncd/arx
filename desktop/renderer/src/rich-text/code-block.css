@@ -1,0 +1,90 @@
+.markdown .code-block {
+    background: #f7f7f7;
+    border-radius: 10px;
+    overflow: clip;
+}
+.markdown .code-header {
+    position: relative;
+    z-index: 1;
+    background: #f7f7f7;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 13px;
+    border: 1px solid #e7e7e7;
+    border-radius: 10px 10px var(--code-bottom-radius, 0px) var(--code-bottom-radius, 0px);
+    color: #8b8b8b;
+    font-size: 10px;
+    line-height: 1.5;
+}
+.markdown .code-title {
+    font-size: 11px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.markdown .code-copy {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: #777;
+    font: inherit;
+    cursor: pointer;
+}
+.markdown .code-copy:hover {
+    background: var(--hover);
+}
+
+.markdown .diff-code {
+    display: block;
+    width: max-content;
+    min-width: 100%;
+}
+.markdown .diff-line {
+    display: inline-block;
+    min-width: 100%;
+}
+.markdown .diff-line.addition {
+    color: #39704a;
+    background: #edf5ee;
+}
+.markdown .diff-line.deletion {
+    color: #aa544b;
+    background: #fff0ed;
+}
+.markdown .diff-line.file {
+    color: #777;
+}
+.markdown .diff-line.hunk {
+    color: #59738b;
+}
+
+.markdown .code-block > pre {
+    border: 1px solid #e7e7e7;
+    border-top: 0;
+    border-radius: 0 0 10px 10px;
+}
+.markdown .code-block[data-sticky="true"] > .code-header {
+    position: sticky;
+    top: 8px;
+    box-shadow: 0 -8px 0 1px white;
+}
+
+.markdown .code-block[data-sticky="true"] > .code-header::before {
+    content: "";
+    position: absolute;
+    top: -9px;
+    left: -1px;
+    right: -1px;
+    height: 8px;
+    background: white;
+    pointer-events: none;
+}

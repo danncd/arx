@@ -1,0 +1,101 @@
+.select-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+    color: #303030;
+    text-align: left;
+}
+
+.select-trigger > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.select-trigger > svg {
+    width: 13px;
+    height: 13px;
+    flex: none;
+    color: #777;
+}
+
+.select-compact {
+    width: auto;
+    max-width: 260px;
+    height: 30px;
+    padding: 0 9px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: #777;
+    font-size: 12px;
+}
+
+.select-compact:hover,
+.select-compact[aria-expanded="true"] {
+    background: var(--hover);
+    color: #262626;
+}
+
+.select-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    min-width: 0;
+    min-height: 30px;
+    padding: 0 9px;
+    border-radius: 10px;
+    color: #262626;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.select-option.has-description {
+    min-height: 40px;
+    padding: 5px 9px;
+}
+
+.select-option-copy {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    gap: 1.5px;
+    min-width: 0;
+}
+
+.select-option-copy > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.select-option small {
+    color: #8e8e93;
+    font-size: 10.5px;
+    line-height: 1.2;
+}
+
+.select-option > svg {
+    width: 13px;
+    height: 13px;
+    flex: none;
+    color: var(--jade);
+}
+
+.select-option.active,
+.select-option[aria-selected="true"] {
+    background: var(--hover);
+}
+
+.select-option[aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.model-unloaded {
+    flex: none;
+    color: #999;
+}

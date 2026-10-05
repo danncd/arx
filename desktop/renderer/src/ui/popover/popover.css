@@ -1,0 +1,8 @@
+.popup-surface {
+    padding: 6px;
+    border: 0.5px solid var(--line);
+    border-radius: var(--menu-radius);
+    background: var(--menu);
+    box-shadow: var(--pill-shadow);
+    overflow: hidden;
+}

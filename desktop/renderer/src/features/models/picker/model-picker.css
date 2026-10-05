@@ -1,0 +1,110 @@
+.model-popup {
+    position: fixed;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    user-select: none;
+}
+
+.model-current,
+.model-back {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 38px;
+    padding: 9px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: #303030;
+    text-align: left;
+    flex: none;
+}
+
+.model-current:hover,
+.model-back:hover {
+    background: var(--hover);
+}
+
+.model-current > span {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1;
+    min-width: 0;
+}
+
+.model-current strong {
+    font-size: 14px;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.model-current small {
+    color: #888;
+    font-size: 10.5px;
+}
+
+.model-current svg,
+.model-back svg {
+    width: 12px;
+    height: 12px;
+    flex: none;
+}
+
+.model-back {
+    font-size: 12px;
+    padding: 7px 9px;
+}
+
+.model-options {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow: auto;
+    min-height: 0;
+    outline: none;
+    overscroll-behavior: contain;
+}
+
+.model-section {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #888;
+    font-size: 10px;
+    font-weight: 500;
+    padding: 13px 9px 5px;
+}
+
+.model-options > div:first-child .model-section {
+    padding-top: 6px;
+}
+
+.model-section::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--line);
+}
+
+.model-source-icon,
+.model-current > .model-source-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+    color: var(--muted);
+}
+
+.model-source-icon > svg,
+.model-source-icon > img {
+    width: 16px;
+    height: 16px;
+    object-fit: contain;
+}

@@ -1,0 +1,222 @@
+.tool-activity {
+    margin: 4px 0;
+    color: var(--muted);
+    font-size: 12px;
+    background: #fcfcfc;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+}
+.tool-activity summary {
+    list-style: none;
+    cursor: pointer;
+}
+.tool-activity summary::-webkit-details-marker {
+    display: none;
+}
+.tool-group + .tool-group {
+    border-top: 1px solid var(--line);
+}
+.tool-group-summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 43px;
+    padding: 15px 14px;
+}
+.tool-kind {
+    flex: none;
+    color: #868686;
+}
+.tool-title {
+    flex: 1;
+    min-width: 0;
+    color: var(--text);
+    font-weight: 500;
+    display: flex;
+    align-items: baseline;
+    overflow: hidden;
+}
+.tool-action {
+    flex: none;
+    max-width: 65%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.tool-target {
+    color: var(--muted);
+    font-weight: 400;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.tool-separator {
+    color: var(--faint);
+    font-weight: 400;
+    white-space: pre;
+    flex: none;
+}
+.tool-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: #999;
+    white-space: nowrap;
+}
+.tool-status.live {
+    color: var(--jade);
+}
+.tool-status.warning {
+    color: #b97922;
+}
+.tool-chevron {
+    flex: none;
+    color: #999;
+    transition: transform var(--expand-duration) var(--expand-easing);
+}
+.tool-group[open] > summary > .tool-chevron,
+.tool-file[open] > summary > .tool-chevron {
+    transform: rotate(90deg);
+}
+.tool-files {
+    padding: 0 14px 10px;
+}
+.tool-file > summary {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 6px 0;
+    min-height: 37px;
+}
+.tool-filename {
+    flex: 0 0 auto;
+    max-width: 65%;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.tool-path {
+    flex: 1;
+    font-size: 10px;
+    color: #999;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+.tool-io {
+    margin: 3px 0 10px;
+    border: 1px solid #e8e8e8;
+    border-radius: 8px;
+    background: white;
+    overflow: hidden;
+}
+.tool-io-tabs {
+    display: flex;
+    gap: 5px;
+    padding: 5px 10px;
+    border-bottom: 1px solid #eee;
+}
+.tool-io-tabs button {
+    border: 0;
+    padding: 2px 10px;
+    border-radius: 5px;
+    font-size: 11px;
+    color: #909090;
+    background: transparent;
+    cursor: pointer;
+}
+.tool-io-tabs button:hover,
+.tool-io-tabs button[aria-pressed="true"] {
+    color: #424242;
+    background: #f3f3f3;
+}
+.tool-io pre {
+    margin: 0;
+    padding: 13px 15px;
+    max-height: 240px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: #616161;
+    font:
+        11px/1.8 ui-monospace,
+        SFMono-Regular,
+        Menlo,
+        monospace;
+}
+.tool-spinner {
+    animation: tool-spin 1s linear infinite;
+}
+@keyframes tool-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .tool-spinner {
+        animation: none;
+    }
+    .tool-chevron {
+        transition: none;
+    }
+}
+
+.tool-group,
+.tool-file {
+    interpolate-size: allow-keywords;
+}
+.tool-group::details-content,
+.tool-file::details-content {
+    display: block;
+    block-size: 0;
+    overflow: clip;
+    opacity: 0;
+    transition:
+        block-size var(--expand-duration) var(--expand-easing),
+        opacity var(--expand-duration) var(--expand-easing),
+        content-visibility var(--expand-duration) allow-discrete;
+}
+.tool-group[open]::details-content,
+.tool-file[open]::details-content {
+    block-size: auto;
+    opacity: 1;
+}
+.tool-result-height {
+    overflow: hidden;
+    transition: height var(--expand-duration) var(--expand-easing);
+}
+@media (prefers-reduced-motion: reduce) {
+    .tool-group::details-content,
+    .tool-file::details-content,
+    .tool-result-height {
+        transition: none;
+    }
+}
+
+.tool-reveal {
+    overflow: clip;
+}
+.tool-reveal-content {
+    display: flow-root;
+}
+
+.tool-changes {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+}
+.tool-changes .tool-added {
+    color: #39704a;
+}
+.tool-changes .tool-removed {
+    color: #aa544b;
+}

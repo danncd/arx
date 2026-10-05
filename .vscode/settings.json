@@ -1,11 +1,12 @@
 {
-  "explorer.fileNesting.enabled": true,
-  "explorer.fileNesting.expand": false,
-  "explorer.fileNesting.patterns": {
-    "*.go": "${capture}_test.go",
-    "*.ts": "${capture}.test.ts",
-    "*.tsx": "${capture}.test.tsx, ${capture}.test.ts",
-    "package.json": "package-lock.json",
-    "tsconfig.json": "tsconfig.tsbuildinfo"
-  }
+    "search.exclude": {
+        "**/node_modules": true,
+        "**/.build": true,
+        "dist": true,
+        "prototypes": true
+    },
+    "files.exclude": {
+        "**/node_modules": true,
+        "**/.build": true
+    }
 }

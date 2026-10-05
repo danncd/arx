@@ -1,0 +1,36 @@
+.web-site-icon {
+    width: 16px;
+    height: 16px;
+    object-fit: contain;
+    flex: none;
+    color: #868686;
+}
+.web-page-output {
+    padding: 12px 14px;
+    font-size: 12px;
+    line-height: 1.55;
+}
+.web-page-output > a {
+    color: var(--text);
+    font-weight: 500;
+    text-decoration: none;
+}
+.web-page-output > a:hover {
+    text-decoration: underline;
+}
+.web-source-url {
+    color: var(--faint);
+    font-size: 10px;
+    overflow-wrap: anywhere;
+    margin-top: 3px;
+}
+.tool-io .web-page-output pre {
+    padding: 0;
+    margin: 12px 0 !important;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.web-source-note {
+    color: var(--faint);
+    font-size: 10px;
+}

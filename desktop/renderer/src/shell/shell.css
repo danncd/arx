@@ -1,0 +1,50 @@
+.app-shell {
+    --visible-sidebar-width: var(--sidebar-width);
+    position: relative;
+    display: flex;
+    width: 100%;
+    height: 100dvh;
+}
+.main-pane {
+    overflow: hidden;
+    padding-top: 54px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+.chat-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    width: 100%;
+}
+
+.connection-error {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: var(--muted);
+}
+.connection-error p {
+    margin: 0;
+}
+.connection-error button {
+    padding: 7px 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--row-radius);
+    color: var(--text);
+}
+.connection-error button:hover {
+    background: var(--hover);
+}
+
+.startup-placeholder {
+    height: 100vh;
+    background: var(--canvas);
+}

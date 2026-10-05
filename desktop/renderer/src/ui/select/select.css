@@ -1,0 +1,124 @@
+.select-control {
+    position: relative;
+    width: 184px;
+    max-width: 100%;
+}
+.select-control > button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    min-height: 34px;
+    padding: 7px 10px;
+    border: 0.5px solid var(--control-line);
+    border-radius: 9px;
+    background: var(--canvas);
+    font-size: 12px;
+}
+.select-control > button > .select-option-title {
+    min-width: 0;
+}
+.select-control > button > svg {
+    flex: none;
+}
+.select-trigger-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.select-options {
+    position: absolute;
+    top: calc(100% + 5px);
+    right: 0;
+    width: 100%;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: var(--menu-radius);
+    background: var(--menu);
+    box-shadow: var(--pill-shadow);
+    z-index: 2;
+}
+.select-options button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    min-height: 32px;
+    padding: 7px 9px;
+    border-radius: 7px;
+    font-size: 12px;
+    text-align: left;
+    margin-bottom: 3px;
+}
+.select-options button:last-child {
+    margin-bottom: 0;
+}
+.select-options button:hover,
+.select-options button[aria-selected="true"],
+.select-control > button:hover {
+    background: var(--hover);
+}
+.select-options button > svg {
+    color: var(--jade);
+}
+
+.select-control[data-compact="true"] {
+    width: auto;
+}
+.select-control[data-compact="true"] > button {
+    border: 0;
+    padding: 3px 5px;
+    min-height: 26px;
+    background: transparent;
+    color: var(--muted);
+    gap: 5px;
+}
+.select-control[data-direction="up"] .select-options {
+    top: auto;
+    bottom: calc(100% + 7px);
+    left: 0;
+    right: auto;
+    width: 248px;
+    max-width: calc(100vw - 48px);
+    z-index: 20;
+}
+.select-option-label {
+    min-width: 0;
+}
+.select-option-label small {
+    display: block;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--muted);
+    margin-top: 3px;
+    line-height: 1.4;
+}
+.select-options button {
+    gap: 12px;
+}
+.select-options button > svg {
+    flex: none;
+}
+
+.select-option-title {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+.select-option-title svg {
+    flex: none;
+}
+
+.select-menu-title {
+    padding: 7px 9px 6px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.select-control > button[data-tone="danger"],
+.select-options button[data-tone="danger"] .select-option-title,
+.select-options button[data-tone="danger"] > svg {
+    color: var(--danger);
+}
